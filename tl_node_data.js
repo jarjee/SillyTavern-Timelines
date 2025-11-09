@@ -498,9 +498,10 @@ export async function prepareData(data, isGroupChat) {
     // Try bulk fetch first (if server plugin is installed)
     const bulkData = await fetchDataBulk(characterAvatar, isGroupChat);
 
-    if (bulkData) {
-        // Use bulk data directly
-        return convertToCytoscapeElements(bulkData.chats);
+    if (bulkData && bulkData.graph) {
+        // Server-side graph building - return prebuilt graph directly
+        console.log('Using server-side prebuilt graph');
+        return bulkData.graph;
     }
 
     // Fallback: Individual requests (original behavior)
