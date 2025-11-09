@@ -436,9 +436,52 @@ export async function fetchData(characterAvatar) {
 }
 
 /**
+ * Attempts to fetch all chat data via the bulk endpoint (optimized server plugin).
+ * Falls back to individual requests if the plugin is not installed.
+ *
+ * @async
+ * @param {string} characterAvatar - The URL of the character's avatar
+ * @param {boolean} isGroupChat - Whether this is a group chat
+ * @returns {Promise<Object|null>} Bulk chat data or null if endpoint not available
+ */
+async function fetchDataBulk(characterAvatar, isGroupChat) {
+    try {
+        const response = await fetch('/api/plugins/timelines-data/bulk-fetch', {
+            method: 'POST',
+            body: JSON.stringify({
+                avatar_url: characterAvatar,
+                is_group: isGroupChat,
+            }),
+            headers: getRequestHeaders(),
+        });
+
+        // If 404, the plugin is not installed - return null for fallback
+        if (response.status === 404) {
+            return null;
+        }
+
+        if (!response.ok) {
+            console.warn(`Bulk fetch failed with status ${response.status}, falling back to individual requests`);
+            return null;
+        }
+
+        const bulkData = await response.json();
+        console.log('Successfully fetched timeline data via bulk endpoint');
+        return bulkData;
+
+    } catch (error) {
+        console.warn('Bulk fetch endpoint error, falling back to individual requests:', error.message);
+        return null;
+    }
+}
+
+/**
  * Prepares chat data by fetching detailed chat content, sorting by file names, and converting
  * the consolidated data into a format suitable for Cytoscape visualization. This function
  * fetches individual or group chat data based on the `isGroupChat` flag.
+ *
+ * First attempts to use the optimized bulk endpoint if available (server plugin),
+ * then falls back to individual requests if the plugin is not installed.
  *
  * @async
  * @param {Object} data - A dictionary containing summary or metadata of chats.
@@ -450,6 +493,18 @@ export async function fetchData(characterAvatar) {
  */
 export async function prepareData(data, isGroupChat) {
     const context = getContext();
+    const characterAvatar = characters[context.characterId].avatar;
+
+    // Try bulk fetch first (if server plugin is installed)
+    const bulkData = await fetchDataBulk(characterAvatar, isGroupChat);
+
+    if (bulkData) {
+        // Use bulk data directly
+        return convertToCytoscapeElements(bulkData.chats);
+    }
+
+    // Fallback: Individual requests (original behavior)
+    console.log('Using individual chat requests (server plugin not detected)');
     let chat_dict = {};
     let chat_list = Object.values(data).sort((a, b) => a['file_name'].localeCompare(b['file_name'])).reverse();
 
