@@ -1,0 +1,24 @@
+{
+  "name": "sillytavern-timelines",
+  "version": "1.0.0",
+  "description": "Timeline visualization extension for SillyTavern",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "bench": "vitest bench"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^1.1.0",
+    "vitest": "^1.1.0"
+  },
+  "keywords": [
+    "sillytavern",
+    "timeline",
+    "chat",
+    "visualization"
+  ],
+  "author": "",
+  "license": "MIT"
+}
