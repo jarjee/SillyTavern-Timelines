@@ -1,4 +1,5 @@
 import { highlightElements, restoreElements } from './tl_style.js';
+import { runLayoutWithCache } from './tl_layout_cache.js';
 
 let currentOrientation = 'TB';  // starting orientation
 
@@ -8,9 +9,9 @@ let currentOrientation = 'TB';  // starting orientation
  * @param {Object} cy - The Cytoscape instance representing the graph.
  * @param {Object} layout - The Cytoscape layout configuration object.
  */
-export function toggleGraphOrientation(cy, layout) {
+export async function toggleGraphOrientation(cy, layout) {
     currentOrientation = (currentOrientation === 'LR') ? 'TB' : 'LR';
-    setOrientation(cy, currentOrientation, layout);
+    await setOrientation(cy, currentOrientation, layout);
 }
 
 /**
@@ -21,12 +22,12 @@ export function toggleGraphOrientation(cy, layout) {
  * @param {Object} cy - The Cytoscape instance representing the graph.
  * @param {Object} layout - The Cytoscape layout configuration object.
  */
-export function setGraphOrientationBasedOnViewport(cy, layout) {
+export async function setGraphOrientationBasedOnViewport(cy, layout) {
     const viewportWidth = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth;
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight;
 
     const orientation = (viewportWidth > viewportHeight) ? 'LR' : 'TB';
-    setOrientation(cy, orientation, layout);
+    await setOrientation(cy, orientation, layout);
 }
 
 /**
@@ -47,10 +48,13 @@ export function getGraphOrientation() {
  * @param {Object} layout - The Cytoscape layout configuration object.
  * @private
  */
-function setOrientation(cy, orientation, layout) {
+async function setOrientation(cy, orientation, layout) {
     // Update layout
     layout.rankDir = orientation;
-    cy.layout(layout).run();
+
+    // Use cached layout for better performance, force recompute on orientation change
+    await runLayoutWithCache(cy, layout, true);
+
     // Update taxi-direction in style
     const taxiDirection = orientation === 'TB' ? 'downward' : 'rightward';
     cy.style().selector('edge').style({

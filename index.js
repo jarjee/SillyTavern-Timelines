@@ -69,6 +69,7 @@ import { registerSlashCommand } from '../../../slash-commands.js';
 import { fixMarkdown } from '../../../power-user.js';
 import { hideLoader, showLoader } from '../../../loader.js';
 import { delay } from '../../../utils.js';
+import { layoutCache, runLayoutWithCache, optimizedDagreSettings } from './tl_layout_cache.js';
 
 let defaultSettings = {
     nodeWidth: 25,
@@ -80,7 +81,7 @@ let defaultSettings = {
     fixedTooltip: false,
     fixedHoverTooltip: false,
     align: 'UL',
-    nodeRanker: 'tight-tree',
+    nodeRanker: 'network-simplex',  // Fastest ranker: network-simplex > tight-tree > longest-path
     nodeShape: 'ellipse',
     curveStyle: 'taxi',
     swipeScale: false,
@@ -1092,12 +1093,16 @@ function setupEventHandlers(cy, nodeData) {
     let showTimeout;  // for the tooltip
 
     // Re-run the graph layout (needed whenever nodes are added/removed)
-    function refreshLayout() {
+    async function refreshLayout(forceRecompute = false) {
         layout.fit = false;
-        const cyLayout = cy.elements().makeLayout(layout);  // TODO: Difference vs. `cy.layout(layout)` (see `setOrientation` in `tl_graph.js`)?
 
+        // Unlock nodes before layout
         cy.nodes().forEach(node => { node.unlock(); });
-        cyLayout.run();  // apply the layout
+
+        // Use cached layout for better performance
+        await runLayoutWithCache(cy, layout, forceRecompute);
+
+        // Lock nodes after layout
         cy.nodes().forEach(node => { node.lock(); });
         fixRootNodePosition(cy);
     }
@@ -1192,9 +1197,9 @@ function setupEventHandlers(cy, nodeData) {
     // Attach event listeners to toolbar buttons.
     let modal = document.getElementById('timelinesModal');
     let rotateBtn = modal.getElementsByClassName('rotate')[0];
-    rotateBtn.onclick = function () {
+    rotateBtn.onclick = async function () {
         toggleGraphOrientation(cy, layout);
-        refreshLayout();
+        await refreshLayout(true);  // Force recompute on orientation change
         const [eles, padding] = filterElementsAndPad(cy, undefined);
         cy.stop().animate({
             fit: { eles: eles, padding: padding },
@@ -1203,15 +1208,15 @@ function setupEventHandlers(cy, nodeData) {
     };
 
     let expandBtn = modal.getElementsByClassName('expand')[0];
-    expandBtn.onclick = function () {
+    expandBtn.onclick = async function () {
         toggleSwipes(cy);
-        refreshLayout();
+        await refreshLayout(true);  // Force recompute when toggling swipes
     };
 
     let reloadBtn = modal.getElementsByClassName('reload')[0];
-    reloadBtn.onclick = function () {
+    reloadBtn.onclick = async function () {
         slashCommandHandler(null, 'r');  // r = reload
-        refreshLayout();
+        await refreshLayout(true);  // Force recompute on reload
     };
 
     let zoomtofitBtn = modal.getElementsByClassName('zoomtofit')[0];
@@ -1242,10 +1247,10 @@ function setupEventHandlers(cy, nodeData) {
         closeOpenDrawers();
     });
 
-    cy.on('render', function () {
+    cy.on('render', async function () {
         if (!hasSetOrientation) {
             hasSetOrientation = true;
-            setGraphOrientationBasedOnViewport(cy, layout);
+            await setGraphOrientationBasedOnViewport(cy, layout);
             cy.nodes().forEach(node => { node.lock(); });  // nodes are always locked after running the layout anyway
             fixRootNodePosition(cy);
         }
@@ -1412,7 +1417,7 @@ function setupEventHandlers(cy, nodeData) {
                 });
             }
 
-            refreshLayout();
+            refreshLayout(true);  // Force recompute when adding/removing swipes
         }
     });
 
