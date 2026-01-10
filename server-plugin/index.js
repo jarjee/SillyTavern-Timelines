@@ -2,6 +2,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { convertToCytoscapeElements } from '../tl_core.js';
+import dagre from '@dagrejs/dagre';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -105,6 +106,109 @@ function formatFileSize(bytes) {
 // Note: Graph building functions have been moved to tl_core.js shared module
 
 // ============================================================================
+// LAYOUT COMPUTATION
+// ============================================================================
+
+/**
+ * Compute dagre layout positions for graph elements
+ * @param {Array} elements - Cytoscape graph elements
+ * @param {Object} layoutOptions - Layout configuration options
+ * @returns {Object} Elements with computed positions
+ */
+function computeDagreLayout(elements, layoutOptions = {}) {
+    const startTime = performance.now();
+
+    // Create dagre graph
+    const g = new dagre.graphlib.Graph({
+        multigraph: true,
+        compound: true
+    });
+
+    // Apply optimized settings based on graph size
+    const nodes = elements.filter(e => e.group === 'nodes');
+    const edges = elements.filter(e => e.group === 'edges');
+    const nodeCount = nodes.length;
+
+    // Size-based optimizations (matching client-side logic)
+    let settings = {
+        rankdir: layoutOptions.rankDir || 'LR',
+        ranker: 'network-simplex',
+        acyclicer: 'greedy',
+        align: undefined,
+        nodesep: 50,
+        edgesep: 10,
+        ranksep: 50
+    };
+
+    if (nodeCount >= 50) {
+        settings.nodesep = 40;
+    }
+    if (nodeCount >= 100) {
+        settings.nodesep = 30;
+        settings.edgesep = 5;
+        settings.ranksep = 40;
+    }
+    if (nodeCount >= 200) {
+        settings.nodesep = 25;
+        settings.edgesep = 3;
+        settings.ranksep = 35;
+    }
+    if (nodeCount >= 500) {
+        settings.nodesep = 20;
+        settings.edgesep = 2;
+        settings.ranksep = 30;
+    }
+
+    // Set graph options
+    g.setGraph(settings);
+    g.setDefaultEdgeLabel(() => ({}));
+
+    // Add nodes to dagre graph
+    nodes.forEach(node => {
+        const width = layoutOptions.nodeWidth || 25;
+        const height = layoutOptions.nodeHeight || 25;
+        g.setNode(node.data.id, {
+            width: width,
+            height: height,
+            label: node.data.id
+        });
+    });
+
+    // Add edges to dagre graph
+    edges.forEach(edge => {
+        g.setEdge(edge.data.source, edge.data.target, {
+            minlen: 1,
+            weight: edge.data.weight || 1
+        });
+    });
+
+    // Run dagre layout
+    const layoutStart = performance.now();
+    dagre.layout(g);
+    const layoutDuration = performance.now() - layoutStart;
+
+    // Apply computed positions to elements
+    const positionedElements = elements.map(ele => {
+        if (ele.group === 'nodes') {
+            const node = g.node(ele.data.id);
+            return {
+                ...ele,
+                position: {
+                    x: node.x,
+                    y: node.y
+                }
+            };
+        }
+        return ele;
+    });
+
+    const totalDuration = performance.now() - startTime;
+    console.log(`[timelines-data] Server-side layout computed in ${layoutDuration.toFixed(2)}ms (total: ${totalDuration.toFixed(2)}ms) for ${nodeCount} nodes`);
+
+    return positionedElements;
+}
+
+// ============================================================================
 // API ENDPOINTS
 // ============================================================================
 
@@ -120,7 +224,7 @@ async function init(router) {
      */
     router.post('/bulk-fetch', async (req, res) => {
         try {
-            const { avatar_url, is_group = false } = req.body;
+            const { avatar_url, is_group = false, computeLayout = true, layoutOptions = {} } = req.body;
 
             if (!avatar_url) {
                 return res.status(400).json({
@@ -129,10 +233,12 @@ async function init(router) {
             }
 
             const cacheKey = getCacheKey(avatar_url, is_group);
+            const fullCacheKey = `${cacheKey}:layout=${computeLayout}`;
 
             // Check cache first
-            const cached = responseCache.get(cacheKey);
+            const cached = responseCache.get(fullCacheKey);
             if (isCacheValid(cached)) {
+                console.log('[timelines-data] Returning cached response');
                 return res.json(cached.data);
             }
 
@@ -197,13 +303,18 @@ async function init(router) {
             }));
 
             // Build graph server-side using shared module
-            const { elements: graphElements, swipeData } = convertToCytoscapeElements(result.chats);
+            let { elements: graphElements, swipeData } = convertToCytoscapeElements(result.chats);
 
             // Store swipes in cache for lazy loading
             swipeCache.set(cacheKey, {
                 data: swipeData,
                 timestamp: Date.now()
             });
+
+            // Compute server-side layout if requested
+            if (computeLayout) {
+                graphElements = computeDagreLayout(graphElements, layoutOptions);
+            }
 
             // Strip swipes from response to reduce size - they'll be lazy-loaded via /swipes/:nodeId
             graphElements.forEach(element => {
@@ -215,11 +326,12 @@ async function init(router) {
 
             const response = {
                 graph: graphElements,
-                metadata: result.metadata
+                metadata: result.metadata,
+                layoutComputed: computeLayout
             };
 
             // Cache the response
-            responseCache.set(cacheKey, {
+            responseCache.set(fullCacheKey, {
                 data: response,
                 timestamp: Date.now()
             });

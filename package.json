@@ -20,5 +20,8 @@
     "visualization"
   ],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@dagrejs/dagre": "^1.1.8"
+  }
 }

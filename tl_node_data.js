@@ -35,13 +35,15 @@ export async function fetchData(characterAvatar) {
  * @param {boolean} isGroupChat - Whether this is a group chat
  * @returns {Promise<Object|null>} Bulk chat data or null if endpoint not available
  */
-async function fetchDataBulk(characterAvatar, isGroupChat) {
+async function fetchDataBulk(characterAvatar, isGroupChat, layoutOptions = {}) {
     try {
         const response = await fetch('/api/plugins/timelines-data/bulk-fetch', {
             method: 'POST',
             body: JSON.stringify({
                 avatar_url: characterAvatar,
                 is_group: isGroupChat,
+                computeLayout: true,  // Request server-side layout computation
+                layoutOptions: layoutOptions,
             }),
             headers: getRequestHeaders(),
         });
@@ -57,7 +59,13 @@ async function fetchDataBulk(characterAvatar, isGroupChat) {
         }
 
         const bulkData = await response.json();
-        console.log('Successfully fetched timeline data via bulk endpoint');
+
+        if (bulkData.layoutComputed) {
+            console.log('[Timeline] Server-side layout pre-computed - skipping client-side dagre');
+        } else {
+            console.log('[Timeline] Successfully fetched graph data via bulk endpoint');
+        }
+
         return bulkData;
 
     } catch (error) {
@@ -92,7 +100,10 @@ export async function prepareData(data, isGroupChat) {
     if (bulkData && bulkData.graph) {
         // Server-side graph building - return prebuilt graph directly
         console.log('Using server-side prebuilt graph');
-        return bulkData.graph;
+        return {
+            elements: bulkData.graph,
+            layoutPrecomputed: bulkData.layoutComputed || false
+        };
     }
 
     // Fallback: Individual requests (original behavior)
@@ -136,5 +147,8 @@ export async function prepareData(data, isGroupChat) {
 
     // Use optimized shared module for client-side processing
     const { elements } = convertToCytoscapeElements(chat_dict);
-    return elements;
+    return {
+        elements: elements,
+        layoutPrecomputed: false
+    };
 }

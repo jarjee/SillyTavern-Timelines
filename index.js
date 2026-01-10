@@ -1518,19 +1518,31 @@ async function updateTimelineDataIfNeeded() {
 
         // https://github.com/cytoscape/cytoscape.js-dagre
         // https://js.cytoscape.org/#layouts
-        layout = {
-            name: 'dagre',
-            nodeDimensionsIncludeLabels: true,
-            nodeSep: extension_settings.timeline.nodeSeparation,  // Separation between adjacent nodes in the same rank
-            edgeSep: extension_settings.timeline.edgeSeparation,  // Separation between adjacent edges in the same rank
-            rankSep: extension_settings.timeline.rankSeparation,  // Separation between each rank in the layout
-            rankDir: 'LR',  // 'TB' for top to bottom flow, 'LR' for left to right (this is toggled by `toggleGraphOrientation`)
-            ranker: extension_settings.timeline.nodeRanker,  // Algorithm to compute node rank: 'network-simplex', 'tight-tree', or 'longest-path'
-            spacingFactor: extension_settings.timeline.spacingFactor,  // Multiplicative factor (>0) to expand or compress the overall area that the nodes take up
-            acyclicer: 'greedy',  // 'greedy' or undefined. We shouldn't need an acyclicer, but let's be careful.
-            align: extension_settings.timeline.align,  // Alignment for rank nodes. Can be 'UL', 'UR', 'DL', or 'DR', where U = up, D = down, L = left, and R = right
-            sort: function (a, b) { return a.id() < b.id() },  // Layout tie-breaker: prefer the element that our `buildGraph` created first.
-        };
+
+        // If server pre-computed the layout, use preset layout (positions already in elements)
+        if (lastTimelineData.layoutPrecomputed) {
+            console.info('[Timeline] Using server-side pre-computed layout positions');
+            layout = {
+                name: 'preset',
+                fit: true,
+                padding: 20
+            };
+        } else {
+            // Client-side dagre layout
+            layout = {
+                name: 'dagre',
+                nodeDimensionsIncludeLabels: true,
+                nodeSep: extension_settings.timeline.nodeSeparation,  // Separation between adjacent nodes in the same rank
+                edgeSep: extension_settings.timeline.edgeSeparation,  // Separation between adjacent edges in the same rank
+                rankSep: extension_settings.timeline.rankSeparation,  // Separation between each rank in the layout
+                rankDir: 'LR',  // 'TB' for top to bottom flow, 'LR' for left to right (this is toggled by `toggleGraphOrientation`)
+                ranker: extension_settings.timeline.nodeRanker,  // Algorithm to compute node rank: 'network-simplex', 'tight-tree', or 'longest-path'
+                spacingFactor: extension_settings.timeline.spacingFactor,  // Multiplicative factor (>0) to expand or compress the overall area that the nodes take up
+                acyclicer: 'greedy',  // 'greedy' or undefined. We shouldn't need an acyclicer, but let's be careful.
+                align: extension_settings.timeline.align,  // Alignment for rank nodes. Can be 'UL', 'UR', 'DL', or 'DR', where U = up, D = down, L = left, and R = right
+                sort: function (a, b) { return a.id() < b.id() },  // Layout tie-breaker: prefer the element that our `buildGraph` created first.
+            };
+        }
         return true; // Data was updated
     }
     return false; // No update occurred
@@ -1604,7 +1616,7 @@ async function onTimelineButtonClick() {
 
     handleModalDisplay();  // Show the timeline view, and wire the close button to close it.
     if (dataUpdated) {
-        renderCytoscapeDiagram(lastTimelineData);  // after this, the Cytoscape instance `theCy` is alive
+        renderCytoscapeDiagram(lastTimelineData.elements);  // after this, the Cytoscape instance `theCy` is alive
         toggleSwipes(theCy, extension_settings.timeline.autoExpandSwipes);
     }
     closeOpenDrawers();
