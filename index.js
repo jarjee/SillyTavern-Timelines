@@ -69,7 +69,7 @@ import { registerSlashCommand } from '../../../slash-commands.js';
 import { fixMarkdown } from '../../../power-user.js';
 import { hideLoader, showLoader } from '../../../loader.js';
 import { delay } from '../../../utils.js';
-import { layoutCache, runLayoutWithCache, optimizedDagreSettings } from './tl_layout_cache.js';
+import { layoutCache, runLayoutWithCache } from './tl_layout_cache.js';
 
 let defaultSettings = {
     nodeWidth: 25,
