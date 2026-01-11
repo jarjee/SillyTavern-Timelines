@@ -5,5 +5,8 @@
   "type": "module",
   "main": "index.js",
   "author": "SillyTavern-Timelines",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@dagrejs/dagre": "^1.1.8"
+  }
 }

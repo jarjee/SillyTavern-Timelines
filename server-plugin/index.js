@@ -2,7 +2,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { convertToCytoscapeElements } from './tl_core.js';
-import dagre from './dagre-esm.js';
+import dagre from '@dagrejs/dagre';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
