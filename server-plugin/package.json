@@ -1,0 +1,12 @@
+{
+  "name": "timelines-data",
+  "version": "1.0.0",
+  "description": "Server-side graph building and layout computation for SillyTavern Timelines",
+  "type": "module",
+  "main": "index.js",
+  "author": "SillyTavern-Timelines",
+  "license": "MIT",
+  "dependencies": {
+    "@dagrejs/dagre": "^1.1.8"
+  }
+}

@@ -1,7 +1,7 @@
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
-import { convertToCytoscapeElements } from '../tl_core.js';
+import { convertToCytoscapeElements } from './tl_core.js';
 import dagre from '@dagrejs/dagre';
 
 const __filename = fileURLToPath(import.meta.url);
