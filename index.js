@@ -1094,6 +1094,24 @@ function setupEventHandlers(cy, nodeData) {
 
     // Re-run the graph layout (needed whenever nodes are added/removed)
     async function refreshLayout(forceRecompute = false) {
+        // If we were using server-side preset layout, switch to client-side dagre for recomputation
+        if (layout.name === 'preset') {
+            console.log('[Timeline] Switching from preset to client-side dagre for layout recomputation');
+            layout = {
+                name: 'dagre',
+                nodeDimensionsIncludeLabels: true,
+                nodeSep: extension_settings.timeline.nodeSeparation,
+                edgeSep: extension_settings.timeline.edgeSeparation,
+                rankSep: extension_settings.timeline.rankSeparation,
+                rankDir: layout.rankDir || 'LR',  // Preserve orientation if it was changed
+                ranker: extension_settings.timeline.nodeRanker,
+                spacingFactor: extension_settings.timeline.spacingFactor,
+                acyclicer: 'greedy',
+                align: extension_settings.timeline.align,
+                sort: function (a, b) { return a.id() < b.id() },
+            };
+        }
+
         layout.fit = false;
 
         // Unlock nodes before layout
