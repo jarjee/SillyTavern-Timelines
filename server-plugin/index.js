@@ -10,7 +10,6 @@ const __dirname = path.dirname(__filename);
  * Stores cached responses for quick repeated requests
  */
 const responseCache = new Map();
-const swipeCache = new Map();
 const CACHE_TTL = 30000; // 30 seconds in milliseconds
 
 /**
@@ -288,10 +287,9 @@ function createNode(nodeId, messageId, text, group, allChatFileNamesAndLengths) 
  * Build DAG from preprocessed chats
  * @param {Array} allChats - Transposed chat structure
  * @param {Object} allChatFileNamesAndLengths - Chat lengths
- * @param {string} cacheKey - Key for swipe storage
  * @returns {Array} Cytoscape elements
  */
-function buildGraph(allChats, allChatFileNamesAndLengths, cacheKey) {
+function buildGraph(allChats, allChatFileNamesAndLengths) {
     let cyElements = [];
     let keyCounter = 1;
     let previousNodes = {};
@@ -419,78 +417,15 @@ function buildGraph(allChats, allChatFileNamesAndLengths, cacheKey) {
         }
     });
 
-    // Store swipes in cache for lazy loading
-    swipeCache.set(cacheKey, {
-        data: parentSwipeData,
-        timestamp: Date.now()
-    });
-
     return cyElements;
-}
-
-/**
- * Highlight checkpoint paths
- * @param {Array} rawData - Cytoscape elements
- * @returns {Array} Modified elements
- */
-function highlightCheckpointPaths(rawData) {
-    // Find all checkpoint nodes
-    const bookmarkNodes = rawData.filter(entry =>
-        entry.group === 'nodes' && entry.data.isBookmark
-    );
-
-    // Highlight path from each checkpoint to root
-    bookmarkNodes.forEach(bookmarkNode => {
-        let currentNode = bookmarkNode;
-        let currentZIndex = 1000;
-        let currentHighlightThickness = 4;
-
-        while (currentNode) {
-            // Stop if we hit another checkpoint
-            if (currentNode !== bookmarkNode && currentNode.data.isBookmark) {
-                break;
-            }
-
-            // Find incoming edge
-            let incomingEdge = rawData.find(entry =>
-                entry.group === 'edges' && entry.data.target === currentNode.data.id
-            );
-
-            if (incomingEdge) {
-                // Color the edge
-                incomingEdge.data.isHighlight = true;
-                incomingEdge.data.color = bookmarkNode.data.color;
-                incomingEdge.data.bookmarkName = bookmarkNode.data.bookmarkName;
-                incomingEdge.data.highlightThickness = currentHighlightThickness;
-                currentHighlightThickness = Math.min(currentHighlightThickness + 0.1, 6);
-
-                // Color the node border
-                currentNode.data.borderColor = incomingEdge.data.color;
-
-                // Adjust z-index for layering
-                incomingEdge.data.zIndex = currentZIndex;
-                currentZIndex++;
-
-                // Move to parent node
-                currentNode = rawData.find(entry =>
-                    entry.group === 'nodes' && entry.data.id === incomingEdge.data.source
-                );
-            } else {
-                currentNode = null; // Reached root
-            }
-        }
-    });
-
-    return rawData;
 }
 
 /**
  * Convert chat history to Cytoscape elements
  * @param {Object} chatHistory - {file_name: [messages]}
- * @param {string} cacheKey - Key for swipe cache
  * @returns {Array} Cytoscape elements
  */
-function convertToCytoscapeElements(chatHistory, cacheKey) {
+function convertToCytoscapeElements(chatHistory) {
     let allChats = preprocessChatSessions(chatHistory);
 
     // Get chat lengths
@@ -499,9 +434,9 @@ function convertToCytoscapeElements(chatHistory, cacheKey) {
         allChatFileNamesAndLengths[key] = val.length;
     }
 
-    let elements = buildGraph(allChats, allChatFileNamesAndLengths, cacheKey);
-    elements = highlightCheckpointPaths(elements);
-    return elements;
+    // Note: checkpoint path highlighting is intentionally NOT done here.
+    // The frontend's setupStylesAndData() -> highlightPathToRoot() handles it.
+    return buildGraph(allChats, allChatFileNamesAndLengths);
 }
 
 // ============================================================================
@@ -573,8 +508,10 @@ async function init(router) {
                         }
                     }).filter(msg => msg !== null);
 
-                    // Remove metadata line for individual chats
-                    if (!is_group && messages.length > 0 && (!messages[0].mes || messages[0].chat_metadata)) {
+                    // Remove metadata line for individual chats.
+                    // The first line of a .jsonl chat file is always metadata for non-group chats,
+                    // matching the frontend behavior where currentChat.shift() is unconditional.
+                    if (!is_group && messages.length > 0) {
                         messages.shift();
                     }
 
@@ -597,15 +534,7 @@ async function init(router) {
             }));
 
             // Build graph server-side
-            const graphElements = convertToCytoscapeElements(result.chats, cacheKey);
-
-            // Strip swipes from response to reduce size - they'll be lazy-loaded via /swipes/:nodeId
-            graphElements.forEach(element => {
-                if (element.group === 'nodes' && element.data.storedSwipes) {
-                    delete element.data.storedSwipes;
-                    // Keep totalSwipes and currentSwipeIndex for UI
-                }
-            });
+            const graphElements = convertToCytoscapeElements(result.chats);
 
             const response = {
                 graph: graphElements,
@@ -629,44 +558,6 @@ async function init(router) {
     });
 
     /**
-     * Lazy-load swipes for a specific node
-     * GET /api/plugins/timelines-data/swipes/:nodeId
-     */
-    router.get('/swipes/:nodeId', (req, res) => {
-        try {
-            const { nodeId } = req.params;
-            const { cacheKey } = req.query;
-
-            if (!cacheKey) {
-                return res.status(400).json({
-                    error: 'Missing required query parameter: cacheKey'
-                });
-            }
-
-            const cached = swipeCache.get(cacheKey);
-            if (!isCacheValid(cached)) {
-                return res.status(404).json({
-                    error: 'Swipe data not found or expired'
-                });
-            }
-
-            const swipeData = cached.data[nodeId];
-            if (!swipeData) {
-                return res.json({ swipes: [] });
-            }
-
-            res.json({
-                swipes: swipeData.storedSwipes,
-                totalSwipes: swipeData.totalSwipes,
-                currentSwipeIndex: swipeData.currentSwipeIndex
-            });
-        } catch (error) {
-            console.error('[timelines-data] Error in swipes endpoint:', error);
-            res.status(500).json({ error: error.message });
-        }
-    });
-
-    /**
      * Invalidate cache
      * POST /api/plugins/timelines-data/invalidate-cache
      */
@@ -677,10 +568,8 @@ async function init(router) {
             if (avatar_url) {
                 const cacheKey = getCacheKey(avatar_url, is_group);
                 responseCache.delete(cacheKey);
-                swipeCache.delete(cacheKey);
             } else {
                 responseCache.clear();
-                swipeCache.clear();
             }
 
             res.json({ success: true });
@@ -700,7 +589,6 @@ async function init(router) {
  */
 async function exit() {
     responseCache.clear();
-    swipeCache.clear();
     console.log('[timelines-data] Plugin unloaded.');
     return Promise.resolve();
 }
