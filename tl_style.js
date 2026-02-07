@@ -76,7 +76,7 @@ function highlightPathToRoot(rawData, bookmarkNodeId, currentHighlightThickness 
  * @param {Object} nodeData - Data structure representing the graph with nodes and edges.
  * @returns {Array} An array of style definitions suitable for use with Cytoscape.
  */
-export function setupStylesAndData(nodeData) {
+export function setupStylesAndData(nodeData, skipHighlighting = false) {
     const context = getContext();
     let selected_group = context.groupId;
     let group = context.groups.find(group => group.id === selected_group);
@@ -101,11 +101,14 @@ export function setupStylesAndData(nodeData) {
         theme.bookmarkColor = extension_settings.timeline.bookmarkColor;
     }
 
-    Object.values(nodeData).forEach(entry => {
-        if (entry.group === 'nodes' && entry.data.isBookmark) {
-            highlightPathToRoot(nodeData, entry.data.id);
-        }
-    });
+    // Apply checkpoint path highlighting (unless the server already did it)
+    if (!skipHighlighting) {
+        Object.values(nodeData).forEach(entry => {
+            if (entry.group === 'nodes' && entry.data.isBookmark) {
+                highlightPathToRoot(nodeData, entry.data.id);
+            }
+        });
+    }
 
     const cytoscapeStyles = [
         {

@@ -1,9 +1,14 @@
 import path from 'path';
 import fs from 'fs/promises';
+import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// dagre.js is a UMD bundle — use createRequire to import it from the extension root
+const require = createRequire(import.meta.url);
+const dagre = require(path.resolve(__dirname, '../dagre.js'));
 
 /**
  * Response cache with TTL (Time To Live)
@@ -13,13 +18,15 @@ const responseCache = new Map();
 const CACHE_TTL = 30000; // 30 seconds in milliseconds
 
 /**
- * Get or create cache key for a character/group combination
+ * Get or create cache key for a character/group/layout combination
  * @param {string} characterId - Avatar URL (for individual) or group ID
  * @param {boolean} isGroup - Whether this is a group chat
+ * @param {Object} layoutSettings - Layout settings that affect the graph
  * @returns {string} Cache key
  */
-function getCacheKey(characterId, isGroup) {
-    return `${isGroup ? 'group' : 'char'}:${characterId}`;
+function getCacheKey(characterId, isGroup, layoutSettings) {
+    const layoutHash = layoutSettings ? JSON.stringify(layoutSettings) : '';
+    return `${isGroup ? 'group' : 'char'}:${characterId}:${layoutHash}`;
 }
 
 /**
@@ -434,9 +441,142 @@ function convertToCytoscapeElements(chatHistory) {
         allChatFileNamesAndLengths[key] = val.length;
     }
 
-    // Note: checkpoint path highlighting is intentionally NOT done here.
-    // The frontend's setupStylesAndData() -> highlightPathToRoot() handles it.
-    return buildGraph(allChats, allChatFileNamesAndLengths);
+    let elements = buildGraph(allChats, allChatFileNamesAndLengths);
+    elements = highlightCheckpointPaths(elements);
+    return elements;
+}
+
+// ============================================================================
+// POST-PROCESSING: HIGHLIGHTING & LAYOUT
+// ============================================================================
+
+/**
+ * Highlight checkpoint paths from each bookmark node to the root.
+ * Identical to the frontend's highlightPathToRoot in tl_style.js,
+ * applied to each bookmark node.
+ * @param {Array} rawData - Cytoscape elements
+ * @returns {Array} Modified elements (mutated in place)
+ */
+function highlightCheckpointPaths(rawData) {
+    const bookmarkNodes = rawData.filter(entry =>
+        entry.group === 'nodes' && entry.data.isBookmark
+    );
+
+    bookmarkNodes.forEach(bookmarkNode => {
+        let currentNode = bookmarkNode;
+        let currentZIndex = 1000;
+        let currentHighlightThickness = 4;
+
+        while (currentNode) {
+            if (currentNode !== bookmarkNode && currentNode.data.isBookmark) {
+                break;
+            }
+
+            let incomingEdge = rawData.find(entry =>
+                entry.group === 'edges' && entry.data.target === currentNode.data.id
+            );
+
+            if (incomingEdge) {
+                incomingEdge.data.isHighlight = true;
+                incomingEdge.data.color = bookmarkNode.data.color;
+                incomingEdge.data.bookmarkName = bookmarkNode.data.bookmarkName;
+                incomingEdge.data.highlightThickness = currentHighlightThickness;
+                currentHighlightThickness = Math.min(currentHighlightThickness + 0.1, 6);
+
+                currentNode.data.borderColor = incomingEdge.data.color;
+
+                incomingEdge.data.zIndex = currentZIndex;
+                currentZIndex++;
+
+                currentNode = rawData.find(entry =>
+                    entry.group === 'nodes' && entry.data.id === incomingEdge.data.source
+                );
+            } else {
+                currentNode = null;
+            }
+        }
+    });
+
+    return rawData;
+}
+
+/**
+ * Compute dagre layout positions server-side and bake them into elements.
+ * Replicates the exact behavior of cytoscape-dagre so positions match.
+ *
+ * @param {Array} elements - Cytoscape elements (nodes and edges)
+ * @param {Object} layoutSettings - Layout configuration from the frontend
+ * @returns {Array} Elements with position data baked in
+ */
+function computeLayout(elements, layoutSettings) {
+    const g = new dagre.graphlib.Graph({ multigraph: true, compound: true });
+
+    const gObj = {};
+    if (layoutSettings.nodeSep != null) gObj.nodesep = layoutSettings.nodeSep;
+    if (layoutSettings.edgeSep != null) gObj.edgesep = layoutSettings.edgeSep;
+    if (layoutSettings.rankSep != null) gObj.ranksep = layoutSettings.rankSep;
+    if (layoutSettings.rankDir != null) gObj.rankdir = layoutSettings.rankDir;
+    if (layoutSettings.align != null) gObj.align = layoutSettings.align;
+    if (layoutSettings.ranker != null) gObj.ranker = layoutSettings.ranker;
+    if (layoutSettings.acyclicer != null) gObj.acyclicer = layoutSettings.acyclicer;
+    g.setGraph(gObj);
+    g.setDefaultEdgeLabel(function () { return {}; });
+    g.setDefaultNodeLabel(function () { return {}; });
+
+    const defaultNodeWidth = layoutSettings.nodeWidth || 25;
+    const defaultNodeHeight = layoutSettings.nodeHeight || 25;
+    const avatarAsRoot = layoutSettings.avatarAsRoot !== false;
+    const swipeScale = layoutSettings.swipeScale || false;
+    const spacingFactor = layoutSettings.spacingFactor || 1;
+
+    // Collect nodes, sorted by id (replicating cytoscape-dagre's sort behavior)
+    const nodes = elements
+        .filter(e => e.group === 'nodes')
+        .sort((a, b) => a.data.id < b.data.id ? -1 : a.data.id > b.data.id ? 1 : 0);
+
+    const edges = elements.filter(e => e.group === 'edges');
+
+    // Add nodes to dagre graph with dimensions matching what Cytoscape would compute
+    for (const node of nodes) {
+        let w, h;
+        if (node.data.label === 'root') {
+            // Root node dimensions match tl_style.js root node selector
+            w = avatarAsRoot ? 40 : defaultNodeWidth;
+            h = avatarAsRoot ? 50 : defaultNodeHeight;
+        } else {
+            // Replicate swipeScale logic from tl_style.js node selector
+            let totalSwipes = Number(node.data.totalSwipes);
+            if (isNaN(totalSwipes)) totalSwipes = 0;
+            w = swipeScale ? Math.abs(Math.log(totalSwipes + 1)) * 4 + defaultNodeWidth : defaultNodeWidth;
+            h = swipeScale ? Math.abs(Math.log(totalSwipes + 1)) * 4 + defaultNodeHeight : defaultNodeHeight;
+        }
+        g.setNode(node.data.id, { width: w, height: h, name: node.data.id });
+    }
+
+    // Add edges to dagre graph (multigraph: use edge id as name)
+    for (const edge of edges) {
+        g.setEdge(edge.data.source, edge.data.target, {
+            minlen: 1,
+            weight: 1,
+            name: edge.data.id,
+        }, edge.data.id);
+    }
+
+    // Run dagre layout
+    dagre.layout(g);
+
+    // Bake positions into element data, applying spacingFactor
+    for (const node of nodes) {
+        const pos = g.node(node.data.id);
+        if (pos) {
+            node.position = {
+                x: pos.x * spacingFactor,
+                y: pos.y * spacingFactor,
+            };
+        }
+    }
+
+    return elements;
 }
 
 // ============================================================================
@@ -455,7 +595,7 @@ async function init(router) {
      */
     router.post('/bulk-fetch', async (req, res) => {
         try {
-            const { avatar_url, is_group = false } = req.body;
+            const { avatar_url, is_group = false, layout_settings } = req.body;
 
             if (!avatar_url) {
                 return res.status(400).json({
@@ -463,7 +603,7 @@ async function init(router) {
                 });
             }
 
-            const cacheKey = getCacheKey(avatar_url, is_group);
+            const cacheKey = getCacheKey(avatar_url, is_group, layout_settings);
 
             // Check cache first
             const cached = responseCache.get(cacheKey);
@@ -534,11 +674,19 @@ async function init(router) {
             }));
 
             // Build graph server-side
-            const graphElements = convertToCytoscapeElements(result.chats);
+            let graphElements = convertToCytoscapeElements(result.chats);
+
+            // Compute layout positions if layout settings were provided
+            let serverComputed = false;
+            if (layout_settings) {
+                graphElements = computeLayout(graphElements, layout_settings);
+                serverComputed = true;
+            }
 
             const response = {
                 graph: graphElements,
-                metadata: result.metadata
+                metadata: result.metadata,
+                serverComputed: serverComputed,
             };
 
             // Cache the response
@@ -566,8 +714,14 @@ async function init(router) {
             const { avatar_url, is_group } = req.body;
 
             if (avatar_url) {
-                const cacheKey = getCacheKey(avatar_url, is_group);
-                responseCache.delete(cacheKey);
+                // Clear all cache entries for this character/group
+                // (may have multiple entries for different layout settings)
+                const prefix = `${is_group ? 'group' : 'char'}:${avatar_url}:`;
+                for (const key of responseCache.keys()) {
+                    if (key.startsWith(prefix)) {
+                        responseCache.delete(key);
+                    }
+                }
             } else {
                 responseCache.clear();
             }

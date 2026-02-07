@@ -442,15 +442,17 @@ export async function fetchData(characterAvatar) {
  * @async
  * @param {string} characterAvatar - The URL of the character's avatar
  * @param {boolean} isGroupChat - Whether this is a group chat
+ * @param {Object} layoutSettings - Layout settings to send to the server for server-side layout computation
  * @returns {Promise<Object|null>} Bulk chat data or null if endpoint not available
  */
-async function fetchDataBulk(characterAvatar, isGroupChat) {
+async function fetchDataBulk(characterAvatar, isGroupChat, layoutSettings) {
     try {
         const response = await fetch('/api/plugins/timelines-data/bulk-fetch', {
             method: 'POST',
             body: JSON.stringify({
                 avatar_url: characterAvatar,
                 is_group: isGroupChat,
+                layout_settings: layoutSettings,
             }),
             headers: getRequestHeaders(),
         });
@@ -487,21 +489,25 @@ async function fetchDataBulk(characterAvatar, isGroupChat) {
  * @param {Object} data - A dictionary containing summary or metadata of chats.
  * @param {boolean} isGroupChat - A flag indicating whether the chat data is for group chats (true)
  *                                or individual chats (false).
- * @returns {Promise<Array>} A promise that resolves with a list of nodes (and potentially edges)
- *                           suitable for the Cytoscape graph library.
+ * @param {Object} layoutSettings - Layout settings for server-side layout computation.
+ * @returns {Promise<Object>} An object with:
+ *   - {Array} graph - Cytoscape elements
+ *   - {boolean} serverComputed - Whether layout & highlighting were computed server-side
  * @throws Will throw an error if the fetch request or data processing encounters issues.
  */
-export async function prepareData(data, isGroupChat) {
+export async function prepareData(data, isGroupChat, layoutSettings) {
     const context = getContext();
     const characterAvatar = characters[context.characterId].avatar;
 
     // Try bulk fetch first (if server plugin is installed)
-    const bulkData = await fetchDataBulk(characterAvatar, isGroupChat);
+    const bulkData = await fetchDataBulk(characterAvatar, isGroupChat, layoutSettings);
 
     if (bulkData && bulkData.graph) {
-        // Server-side graph building - return prebuilt graph directly
-        console.log('Using server-side prebuilt graph');
-        return bulkData.graph;
+        console.log(`Using server-side prebuilt graph (serverComputed: ${bulkData.serverComputed})`);
+        return {
+            graph: bulkData.graph,
+            serverComputed: Boolean(bulkData.serverComputed),
+        };
     }
 
     // Fallback: Individual requests (original behavior)
@@ -542,5 +548,8 @@ export async function prepareData(data, isGroupChat) {
             console.error(error);
         }
     }
-    return convertToCytoscapeElements(chat_dict);
+    return {
+        graph: convertToCytoscapeElements(chat_dict),
+        serverComputed: false,
+    };
 }
