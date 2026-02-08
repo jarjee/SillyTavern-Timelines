@@ -462,6 +462,17 @@ function highlightCheckpointPaths(rawData) {
         entry.group === 'nodes' && entry.data.isBookmark
     );
 
+    // Build indexes for O(1) lookup instead of O(N) linear scans
+    const nodeById = new Map();
+    const edgeByTarget = new Map();
+    for (const entry of rawData) {
+        if (entry.group === 'nodes') {
+            nodeById.set(entry.data.id, entry);
+        } else if (entry.group === 'edges') {
+            edgeByTarget.set(entry.data.target, entry);
+        }
+    }
+
     bookmarkNodes.forEach(bookmarkNode => {
         let currentNode = bookmarkNode;
         let currentZIndex = 1000;
@@ -472,9 +483,7 @@ function highlightCheckpointPaths(rawData) {
                 break;
             }
 
-            let incomingEdge = rawData.find(entry =>
-                entry.group === 'edges' && entry.data.target === currentNode.data.id
-            );
+            let incomingEdge = edgeByTarget.get(currentNode.data.id);
 
             if (incomingEdge) {
                 incomingEdge.data.isHighlight = true;
@@ -488,9 +497,7 @@ function highlightCheckpointPaths(rawData) {
                 incomingEdge.data.zIndex = currentZIndex;
                 currentZIndex++;
 
-                currentNode = rawData.find(entry =>
-                    entry.group === 'nodes' && entry.data.id === incomingEdge.data.source
-                );
+                currentNode = nodeById.get(incomingEdge.data.source);
             } else {
                 currentNode = null;
             }

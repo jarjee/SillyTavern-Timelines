@@ -399,8 +399,12 @@ function makeNodeTippy(node) {
  * 7. Handle newlines and special characters within <code> tags.
  */
 
+const _formatCache = new Map();
 function formatNodeMessage(mes) {
     if (mes == null) return '';
+    const cached = _formatCache.get(mes);
+    if (cached !== undefined) return cached;
+    const originalInput = mes;
     mes = fixMarkdown(mes);
     mes = mes.replaceAll('<', '&lt;').replaceAll('>', '&gt;');
     mes = mes.replace(/```[\s\S]*?```|``[\s\S]*?``|`[\s\S]*?`|(\".+?\")|(\u201C.+?\u201D)/gm, function (match, p1, p2) {
@@ -438,6 +442,7 @@ function formatNodeMessage(mes) {
         return match.replace(/&amp;/g, '&');
     });
 
+    _formatCache.set(originalInput, mes);
     return mes;
 }
 
@@ -1016,26 +1021,29 @@ function toggleSwipes(cy, visible) {
     const swipeNodes = cy.nodes('[?isSwipe]');
     const wasVisible = Boolean(swipeNodes.length > 0);
 
-    if (wasVisible) {  // Remove all old swipe nodes and edges, if any
-        swipeNodes.connectedEdges().remove();
-        swipeNodes.remove();
-    }
-
     if (visible === undefined) {  // New `visible` state not specified, toggle
         visible = !wasVisible;
     }
 
-    if (visible) {
-        cy.nodes().forEach(node => {
-            const storedSwipes = node.data('storedSwipes');
-            if (storedSwipes && storedSwipes.length > 0) {
-                storedSwipes.forEach(({ node: swipeNode, edge: swipeEdge }) => {
-                    cy.add({ group: 'nodes', data: swipeNode });
-                    cy.add({ group: 'edges', data: swipeEdge });
-                });
-            }
-        });
-    }
+    // Batch all add/remove operations to avoid re-rendering on each individual change
+    cy.batch(() => {
+        if (wasVisible) {  // Remove all old swipe nodes and edges, if any
+            swipeNodes.connectedEdges().remove();
+            swipeNodes.remove();
+        }
+
+        if (visible) {
+            cy.nodes().forEach(node => {
+                const storedSwipes = node.data('storedSwipes');
+                if (storedSwipes && storedSwipes.length > 0) {
+                    storedSwipes.forEach(({ node: swipeNode, edge: swipeEdge }) => {
+                        cy.add({ group: 'nodes', data: swipeNode });
+                        cy.add({ group: 'edges', data: swipeEdge });
+                    });
+                }
+            });
+        }
+    });
 }
 
 /**
@@ -1185,8 +1193,11 @@ function setupEventHandlers(cy, nodeData) {
     }
 
     // The text search field is a garden-variety DOM element, so attach an event listener the classical way.
+    // Debounce input to avoid re-running search + layout on every keystroke.
+    let searchDebounceTimer;
     textSearchElement.addEventListener('input', function (evt) {
-        performTextSearch();
+        clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = setTimeout(performTextSearch, 250);
     });
     textSearchElement.addEventListener('focus', function (evt) {
         performTextSearch();
@@ -1400,20 +1411,22 @@ function setupEventHandlers(cy, nodeData) {
             const firstSwipeId = node.data('storedSwipes')[0].node.id;
             const swipeExists = cy.getElementById(firstSwipeId).length > 0;
 
-            if (!swipeExists) {
-                // For this node, add stored swipes and their edges to the graph
-                node.data('storedSwipes').forEach(({ node: swipeNode, edge: swipeEdge }) => {
-                    // increase the edge weight
-                    swipeEdge.weight = 100;
-                    cy.add({ group: 'nodes', data: swipeNode });
-                    cy.add({ group: 'edges', data: swipeEdge });
-                });
-            } else {
-                // For this node, remove stored swipes and their edges from the graph
-                node.data('storedSwipes').forEach(({ node: swipeNode }) => {
-                    cy.getElementById(swipeNode.id).remove();
-                });
-            }
+            cy.batch(() => {
+                if (!swipeExists) {
+                    // For this node, add stored swipes and their edges to the graph
+                    node.data('storedSwipes').forEach(({ node: swipeNode, edge: swipeEdge }) => {
+                        // increase the edge weight
+                        swipeEdge.weight = 100;
+                        cy.add({ group: 'nodes', data: swipeNode });
+                        cy.add({ group: 'edges', data: swipeEdge });
+                    });
+                } else {
+                    // For this node, remove stored swipes and their edges from the graph
+                    node.data('storedSwipes').forEach(({ node: swipeNode }) => {
+                        cy.getElementById(swipeNode.id).remove();
+                    });
+                }
+            });
 
             refreshLayout();
         }
