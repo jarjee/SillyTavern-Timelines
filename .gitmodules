@@ -1,0 +1,3 @@
+[submodule "reference/SillyTavern"]
+	path = reference/SillyTavern
+	url = git@github.com:SillyTavern/SillyTavern.git
