@@ -525,6 +525,7 @@ function highlightCheckpointPaths(rawData) {
  * @returns {Array} Elements with position data baked in
  */
 function computeLayout(elements, layoutSettings) {
+    const tSetup = performance.now();
     const g = new dagre.graphlib.Graph({ multigraph: true, compound: true });
 
     const gObj = {};
@@ -552,6 +553,14 @@ function computeLayout(elements, layoutSettings) {
 
     const edges = elements.filter(e => e.group === 'edges');
 
+    // Count unique node IDs to detect duplicate pushes
+    const uniqueNodeIds = new Set(nodes.map(n => n.data.id));
+    console.log(`[timelines-data] [perf]   computeLayout: ${nodes.length} node elements (${uniqueNodeIds.size} unique IDs), ${edges.length} edges`);
+
+    // Count unique edge (source, target) pairs to detect duplicate edges
+    const uniqueEdgePairs = new Set(edges.map(e => `${e.data.source}->${e.data.target}`));
+    console.log(`[timelines-data] [perf]   computeLayout: ${uniqueEdgePairs.size} unique edge pairs (${edges.length - uniqueEdgePairs.size} duplicate edges)`);
+
     // Add nodes to dagre graph with dimensions matching what Cytoscape would compute
     for (const node of nodes) {
         let w, h;
@@ -578,10 +587,16 @@ function computeLayout(elements, layoutSettings) {
         }, edge.data.id);
     }
 
+    console.log(`[timelines-data] [perf]   computeLayout: graph setup took ${(performance.now() - tSetup).toFixed(1)}ms, dagre graph has ${g.nodeCount()} nodes, ${g.edgeCount()} edges`);
+    console.log(`[timelines-data] [perf]   computeLayout: ranker=${gObj.ranker || 'default'}, rankdir=${gObj.rankdir || 'default'}`);
+
     // Run dagre layout
+    const tDagre = performance.now();
     dagre.layout(g);
+    console.log(`[timelines-data] [perf]   computeLayout: dagre.layout() took ${(performance.now() - tDagre).toFixed(1)}ms`);
 
     // Bake positions into element data, applying spacingFactor
+    const tBake = performance.now();
     for (const node of nodes) {
         const pos = g.node(node.data.id);
         if (pos) {
@@ -591,6 +606,7 @@ function computeLayout(elements, layoutSettings) {
             };
         }
     }
+    console.log(`[timelines-data] [perf]   computeLayout: position baking took ${(performance.now() - tBake).toFixed(1)}ms`);
 
     return elements;
 }
