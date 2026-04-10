@@ -287,6 +287,12 @@ function buildGraph(allChats, allChatFileNamesAndLengths) {
     let previousNodes = {};
     let parentSwipeData = {};
 
+    // Accumulators for per-phase timing within the main loop
+    let timeGrouping = 0;
+    let timeCreateNode = 0;
+    let timeSwipes = 0;
+    let timeEdges = 0;
+
     // Gather AI character names for root node
     let characterNames = new Set();
     for (let messageId = 0; messageId < allChats.length; messageId++) {
@@ -322,13 +328,18 @@ function buildGraph(allChats, allChatFileNamesAndLengths) {
 
     // Process each message depth
     for (let messageId = 0; messageId < allChats.length; messageId++) {
+        let tPhase = performance.now();
         let groups = groupMessagesByContent(allChats[messageId]);
+        timeGrouping += performance.now() - tPhase;
 
         for (const [text, group] of Object.entries(groups)) {
+            let tNode = performance.now();
             const nodeId = `message${keyCounter}`;
             const node = createNode(nodeId, messageId, text, group, allChatFileNamesAndLengths);
+            timeCreateNode += performance.now() - tNode;
 
             // Extract swipes (skip greeting messages at index 0)
+            let tSwipe = performance.now();
             const allSwipes = [];
             let uniqueSwipes = [];
             if (messageId !== 0) {
@@ -401,16 +412,19 @@ function buildGraph(allChats, allChatFileNamesAndLengths) {
                 previousNodes[messageObj.file_name] = nodeId;
                 keyCounter += 1;
             }
+            timeSwipes += performance.now() - tSwipe;
         }
     }
 
     // Attach swipe data to parent nodes
+    const tAttach = performance.now();
     cyElements.forEach(element => {
         if (element.group === 'nodes' && parentSwipeData[element.data.id]) {
             Object.assign(element.data, parentSwipeData[element.data.id]);
         }
     });
 
+    console.log(`[timelines-data] [perf]     buildGraph breakdown: grouping=${timeGrouping.toFixed(1)}ms, createNode=${timeCreateNode.toFixed(1)}ms, swipes+edges=${timeSwipes.toFixed(1)}ms, attachSwipeData=${(performance.now() - tAttach).toFixed(1)}ms`);
     return cyElements;
 }
 
@@ -420,7 +434,9 @@ function buildGraph(allChats, allChatFileNamesAndLengths) {
  * @returns {Array} Cytoscape elements
  */
 function convertToCytoscapeElements(chatHistory) {
+    const tPreprocess = performance.now();
     let allChats = preprocessChatSessions(chatHistory);
+    console.log(`[timelines-data] [perf]   preprocessChatSessions (${allChats.length} depth levels) took ${(performance.now() - tPreprocess).toFixed(1)}ms`);
 
     // Get chat lengths
     let allChatFileNamesAndLengths = {};
@@ -428,8 +444,14 @@ function convertToCytoscapeElements(chatHistory) {
         allChatFileNamesAndLengths[key] = val.length;
     }
 
+    const tBuild = performance.now();
     let elements = buildGraph(allChats, allChatFileNamesAndLengths);
+    console.log(`[timelines-data] [perf]   buildGraph (${elements.length} elements) took ${(performance.now() - tBuild).toFixed(1)}ms`);
+
+    const tHighlight = performance.now();
     elements = highlightCheckpointPaths(elements);
+    console.log(`[timelines-data] [perf]   highlightCheckpointPaths took ${(performance.now() - tHighlight).toFixed(1)}ms`);
+
     return elements;
 }
 
@@ -589,6 +611,7 @@ async function init(router) {
      */
     router.post('/bulk-fetch', async (req, res) => {
         try {
+            const t0 = performance.now();
             const { avatar_url, is_group = false, layout_settings } = req.body;
 
             if (!avatar_url) {
@@ -603,7 +626,11 @@ async function init(router) {
             // Check cache first
             const cached = responseCache.get(cacheKey);
             if (isCacheValid(cached)) {
-                return res.json(cached.data);
+                console.log(`[timelines-data] [perf] Cache hit, serving cached response`);
+                const tCacheStart = performance.now();
+                res.json(cached.data);
+                console.log(`[timelines-data] [perf] res.json (cached) took ${(performance.now() - tCacheStart).toFixed(1)}ms`);
+                return;
             }
 
             // Resolve chat directory from the authenticated user's directories
@@ -621,16 +648,22 @@ async function init(router) {
             }
 
             // Read directory of chats
+            const tDirRead = performance.now();
             const files = await fs.readdir(chatDirectory, { withFileTypes: true });
             const chatFiles = files
                 .filter(file => file.isFile() && file.name.endsWith('.jsonl'))
                 .sort((a, b) => b.name.localeCompare(a.name));
+            console.log(`[timelines-data] [perf] Directory listing (${chatFiles.length} files) took ${(performance.now() - tDirRead).toFixed(1)}ms`);
 
             // Fetch all chats in parallel
+            const tFileRead = performance.now();
+            let totalMessages = 0;
+            let totalBytes = 0;
             await Promise.all(chatFiles.map(async (file) => {
                 try {
                     const chatPath = path.join(chatDirectory, file.name);
                     const content = await fs.readFile(chatPath, 'utf8');
+                    totalBytes += Buffer.byteLength(content, 'utf8');
                     const lines = content.trim().split('\n').filter(line => line.length > 0);
 
                     // Parse chat messages
@@ -651,6 +684,7 @@ async function init(router) {
                     }
 
                     result.chats[file.name] = messages;
+                    totalMessages += messages.length;
 
                     // Get file stats for metadata
                     const stat = await fs.stat(chatPath);
@@ -667,15 +701,20 @@ async function init(router) {
                     console.error(`Error reading chat ${file.name}:`, e.message);
                 }
             }));
+            console.log(`[timelines-data] [perf] File read + parse (${chatFiles.length} files, ${totalMessages} messages, ${(totalBytes / 1024 / 1024).toFixed(1)}MB) took ${(performance.now() - tFileRead).toFixed(1)}ms`);
 
             // Build graph server-side
+            const tGraph = performance.now();
             let graphElements = convertToCytoscapeElements(result.chats);
+            console.log(`[timelines-data] [perf] convertToCytoscapeElements (${graphElements.length} elements) took ${(performance.now() - tGraph).toFixed(1)}ms`);
 
             // Compute layout positions if layout settings were provided
             let serverComputed = false;
             if (layout_settings) {
+                const tLayout = performance.now();
                 graphElements = computeLayout(graphElements, layout_settings);
                 serverComputed = true;
+                console.log(`[timelines-data] [perf] computeLayout took ${(performance.now() - tLayout).toFixed(1)}ms`);
             }
 
             const response = {
@@ -690,7 +729,10 @@ async function init(router) {
                 timestamp: Date.now()
             });
 
+            const tJson = performance.now();
             res.json(response);
+            console.log(`[timelines-data] [perf] res.json (serialize + send) took ${(performance.now() - tJson).toFixed(1)}ms`);
+            console.log(`[timelines-data] [perf] Total request time: ${(performance.now() - t0).toFixed(1)}ms`);
         } catch (error) {
             console.error('[timelines-data] Error in bulk-fetch endpoint:', error);
             res.status(500).json({
