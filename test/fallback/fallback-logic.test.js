@@ -92,6 +92,23 @@ describe('prepareData fallback logic', () => {
         expect(mockFetch.mock.calls[0][0]).toContain('bulk-fetch');
     });
 
+    it('does NOT fall back when server returns empty graph (200 with graph:[])', async () => {
+        // This happens when the chat directory doesn't exist on the server.
+        // We should show an empty graph rather than falling back to individual requests.
+        mockFetch.mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ graph: [], metadata: {}, serverComputed: false }),
+        });
+
+        const result = await prepareData(MOCK_CHAT_LIST, false, null);
+
+        expect(result.graph).toEqual([]);
+        expect(result.serverComputed).toBe(false);
+        // Must NOT make a second request
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
     it('serverComputed=false when server returns serverComputed:false', async () => {
         mockFetch.mockResolvedValueOnce({
             ok: true,

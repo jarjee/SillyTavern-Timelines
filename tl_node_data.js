@@ -504,10 +504,10 @@ export async function prepareData(data, isGroupChat, layoutSettings) {
     // Try bulk fetch first (if server plugin is installed)
     const bulkData = await fetchDataBulk(characterAvatar, isGroupChat, layoutSettings);
 
-    if (bulkData && bulkData.graph) {
+    if (bulkData !== null) {
         console.log(`Using server-side prebuilt graph (serverComputed: ${bulkData.serverComputed})`);
         return {
-            graph: bulkData.graph,
+            graph: bulkData.graph || [],
             serverComputed: Boolean(bulkData.serverComputed),
         };
     }

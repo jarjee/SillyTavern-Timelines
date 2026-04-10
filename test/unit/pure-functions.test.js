@@ -133,28 +133,41 @@ describe('formatFileSize', () => {
 
 describe('getCacheKey', () => {
     it('individual character key format', () => {
-        const key = getCacheKey('avatar.png', false, null);
+        const key = getCacheKey('avatar.png', false, null, 'alice');
         expect(key).toContain('char:');
         expect(key).toContain('avatar.png');
+        expect(key).toContain('alice');
     });
 
     it('group key uses group: prefix', () => {
-        const key = getCacheKey('group123', true, null);
+        const key = getCacheKey('group123', true, null, 'alice');
         expect(key).toContain('group:');
         expect(key).toContain('group123');
     });
 
     it('same params produce same key', () => {
         const settings = { nodeSep: 50, rankSep: 100 };
-        const k1 = getCacheKey('avatar.png', false, settings);
-        const k2 = getCacheKey('avatar.png', false, settings);
+        const k1 = getCacheKey('avatar.png', false, settings, 'alice');
+        const k2 = getCacheKey('avatar.png', false, settings, 'alice');
         expect(k1).toBe(k2);
     });
 
     it('different layout settings produce different keys', () => {
-        const k1 = getCacheKey('avatar.png', false, { a: 1 });
-        const k2 = getCacheKey('avatar.png', false, { a: 2 });
+        const k1 = getCacheKey('avatar.png', false, { a: 1 }, 'alice');
+        const k2 = getCacheKey('avatar.png', false, { a: 2 }, 'alice');
         expect(k1).not.toBe(k2);
+    });
+
+    it('different user handles produce different keys', () => {
+        const k1 = getCacheKey('avatar.png', false, null, 'alice');
+        const k2 = getCacheKey('avatar.png', false, null, 'bob');
+        expect(k1).not.toBe(k2);
+    });
+
+    it('omitting userHandle is stable (defaults to empty string)', () => {
+        const k1 = getCacheKey('avatar.png', false, null);
+        const k2 = getCacheKey('avatar.png', false, null, '');
+        expect(k1).toBe(k2);
     });
 });
 

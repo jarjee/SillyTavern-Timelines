@@ -22,11 +22,12 @@ const CACHE_TTL = 30000; // 30 seconds in milliseconds
  * @param {string} characterId - Avatar URL (for individual) or group ID
  * @param {boolean} isGroup - Whether this is a group chat
  * @param {Object} layoutSettings - Layout settings that affect the graph
+ * @param {string} userHandle - User handle for multi-user isolation
  * @returns {string} Cache key
  */
-function getCacheKey(characterId, isGroup, layoutSettings) {
+function getCacheKey(characterId, isGroup, layoutSettings, userHandle = '') {
     const layoutHash = layoutSettings ? JSON.stringify(layoutSettings) : '';
-    return `${isGroup ? 'group' : 'char'}:${characterId}:${layoutHash}`;
+    return `${userHandle}:${isGroup ? 'group' : 'char'}:${characterId}:${layoutHash}`;
 }
 
 /**
@@ -53,42 +54,18 @@ async function fileExists(filePath) {
 }
 
 /**
- * Get the appropriate chat directory path
- * Supports both single-user and multi-user SillyTavern setups
+ * Resolve chat directory from request user directories.
+ * Mirrors the pattern in SillyTavern's own endpoints/chats.js.
+ * @param {Object} userDirectories - req.user.directories
  * @param {string} avatar_url - The character avatar filename
  * @param {boolean} is_group - Whether this is a group chat
- * @returns {Promise<string>} Path to the chat directory
+ * @returns {string} Path to the chat directory
  */
-async function resolveChatDirectory(avatar_url, is_group) {
-    const serverRoot = path.resolve(__dirname, '../../');
-    const dataDir = path.join(serverRoot, 'data');
-
-    let userDir = 'default-user';
-
-    try {
-        if (await fileExists(dataDir)) {
-            const entries = await fs.readdir(dataDir, { withFileTypes: true });
-            const userDirs = entries
-                .filter(entry => entry.isDirectory())
-                .filter(entry => !entry.name.startsWith('_'))
-                .filter(entry => !entry.name.startsWith('.'));
-
-            if (userDirs.length > 0) {
-                userDir = userDirs[0].name;
-            }
-        }
-    } catch (e) {
-        console.warn('[timelines-data] Could not read user directories:', e.message);
-    }
-
-    const chatsBaseDir = path.join(dataDir, userDir, 'chats');
-
+function resolveChatDirectory(userDirectories, avatar_url, is_group) {
     if (is_group) {
-        return path.join(chatsBaseDir, 'group_chats');
-    } else {
-        const characterName = String(avatar_url).replace('.png', '').replace('.jpg', '').replace('.jpeg', '');
-        return path.join(chatsBaseDir, characterName);
+        return userDirectories.groupChats;
     }
+    return path.join(userDirectories.chats, String(avatar_url).replace('.png', ''));
 }
 
 /**
@@ -612,7 +589,8 @@ async function init(router) {
                 });
             }
 
-            const cacheKey = getCacheKey(avatar_url, is_group, layout_settings);
+            const userHandle = req.user?.profile?.handle ?? '';
+            const cacheKey = getCacheKey(avatar_url, is_group, layout_settings, userHandle);
 
             // Check cache first
             const cached = responseCache.get(cacheKey);
@@ -620,8 +598,8 @@ async function init(router) {
                 return res.json(cached.data);
             }
 
-            // Resolve chat directory
-            const chatDirectory = await resolveChatDirectory(avatar_url, is_group);
+            // Resolve chat directory from the authenticated user's directories
+            const chatDirectory = resolveChatDirectory(req.user.directories, avatar_url, is_group);
 
             const result = {
                 chats: {},
@@ -631,7 +609,7 @@ async function init(router) {
             // Check if directory exists
             if (!(await fileExists(chatDirectory))) {
                 console.warn('[timelines-data] Chat directory does not exist:', chatDirectory);
-                return res.json(result);
+                return res.json({ graph: [], metadata: {}, serverComputed: false });
             }
 
             // Read directory of chats
@@ -721,11 +699,12 @@ async function init(router) {
     router.post('/invalidate-cache', (req, res) => {
         try {
             const { avatar_url, is_group } = req.body;
+            const userHandle = req.user?.profile?.handle ?? '';
 
             if (avatar_url) {
                 // Clear all cache entries for this character/group
                 // (may have multiple entries for different layout settings)
-                const prefix = `${is_group ? 'group' : 'char'}:${avatar_url}:`;
+                const prefix = `${userHandle}:${is_group ? 'group' : 'char'}:${avatar_url}:`;
                 for (const key of responseCache.keys()) {
                     if (key.startsWith(prefix)) {
                         responseCache.delete(key);
@@ -772,5 +751,6 @@ export const _testExports = {
     preprocessChatSessions, groupMessagesByContent, createNode,
     buildGraph, convertToCytoscapeElements, highlightCheckpointPaths,
     computeLayout, formatFileSize, getCacheKey, isCacheValid,
+    resolveChatDirectory,
     responseCache, CACHE_TTL,
 };
