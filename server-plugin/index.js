@@ -8,7 +8,11 @@ const __dirname = path.dirname(__filename);
 
 // dagre.js is a UMD bundle — use createRequire to import it from the extension root
 const require = createRequire(import.meta.url);
-const dagre = require(path.resolve(__dirname, '../dagre.js'));
+const dagrePath = path.resolve(__dirname, '../dagre.js');
+console.log('[timelines-data] __dirname:', __dirname);
+console.log('[timelines-data] dagre.js resolved to:', dagrePath);
+const dagre = require(dagrePath);
+console.log('[timelines-data] dagre loaded, graphlib:', typeof dagre?.graphlib);
 
 /**
  * Response cache with TTL (Time To Live)
