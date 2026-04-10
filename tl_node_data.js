@@ -83,9 +83,11 @@ function buildGraph(allChats, allChatFileNamesAndLengths) {
     });
 
     // Initialize previousNodes (anchoring the beginning of each chat to the graph root node)
-    allChats[0].forEach(({ file_name }) => {
-        previousNodes[file_name] = 'root';
-    });
+    if (allChats.length > 0) {
+        allChats[0].forEach(({ file_name }) => {
+            previousNodes[file_name] = 'root';
+        });
+    }
 
     for (let messageId = 0; messageId < allChats.length; messageId++) {
         // Group messages at this `messageId` (according to sequential message numbering in chat session),
@@ -553,3 +555,8 @@ export async function prepareData(data, isGroupChat, layoutSettings) {
         serverComputed: false,
     };
 }
+
+export const _testExports = {
+    sfc32, cyrb128, preprocessChatSessions, groupMessagesByContent,
+    createNode, buildGraph, convertToCytoscapeElements, postprocessNodes,
+};

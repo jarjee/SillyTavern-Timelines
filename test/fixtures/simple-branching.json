@@ -1,0 +1,128 @@
+{
+  "chat_A.jsonl": [
+    {
+      "mes": "Hello! I'm Aria, your magical guide. How can I help you today?",
+      "name": "Aria",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:00:00"
+    },
+    {
+      "mes": "Hi Aria! I'd like to learn more about magic.",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:01:00"
+    },
+    {
+      "mes": "Wonderful! Magic is the art of channeling your inner energy. Would you like to start with elemental magic or transmutation?",
+      "name": "Aria",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:02:00"
+    },
+    {
+      "mes": "Elemental magic sounds really cool. Can you teach me to control fire?",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:03:00"
+    },
+    {
+      "mes": "Fire magic requires discipline and focus. First, visualize a small flame in your palm. Feel its warmth and let it grow with your intention. Remember, safety comes first!",
+      "name": "Aria",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:04:00"
+    }
+  ],
+  "chat_B.jsonl": [
+    {
+      "mes": "Hello! I'm Aria, your magical guide. How can I help you today?",
+      "name": "Aria",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:00:00"
+    },
+    {
+      "mes": "Hi Aria! I'd like to learn more about magic.",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:01:00"
+    },
+    {
+      "mes": "Excellent choice! Magic comes in many forms. Are you interested in healing magic, divination, or perhaps illusions?",
+      "name": "Aria",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:02:00"
+    },
+    {
+      "mes": "I think healing magic would be most helpful. How do I start practicing?",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:03:00"
+    },
+    {
+      "mes": "Healing magic is beautiful and compassionate. Begin by meditating and connecting with natural energy around you. Place your hands over someone and envision golden light flowing through you to mend their wounds.",
+      "name": "Aria",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:04:00"
+    }
+  ],
+  "chat_C.jsonl": [
+    {
+      "mes": "Hello! I'm Aria, your magical guide. How can I help you today?",
+      "name": "Aria",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:00:00"
+    },
+    {
+      "mes": "Hi Aria! I'd like to learn more about magic.",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:01:00"
+    },
+    {
+      "mes": "Great! There are ancient spells passed down through generations. Would you prefer to study defensive magic, transmutation, or summoning?",
+      "name": "Aria",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:02:00"
+    },
+    {
+      "mes": "Defensive magic sounds practical. What spells would you recommend?",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:03:00"
+    },
+    {
+      "mes": "A shield spell is fundamental. Chant 'Protego' while visualizing a barrier of light around you. This requires strong mental barriers to maintain against stronger attacks.",
+      "name": "Aria",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:04:00"
+    }
+  ]
+}

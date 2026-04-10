@@ -1,0 +1,140 @@
+{
+  "chat_main.jsonl": [
+    {
+      "mes": "Ah, welcome! I sense you're ready for an epic adventure. What kind of quest calls to you? A journey through enchanted forests, perhaps? Or maybe scaling mountains to find a legendary artifact?",
+      "name": "Storyteller",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 20, 2024  14:00:00"
+    },
+    {
+      "mes": "I'd love a story about exploring a mysterious ancient temple! Can you make it thrilling with plenty of puzzles and treasures?",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 20, 2024  14:05:00"
+    },
+    {
+      "mes": "Excellent choice! Picture this: You stand before towering stone gates covered in moss and vines. Intricate carvings of long-forgotten civilizations adorn the entrance. As you step forward, the ground trembles. The gates slowly creak open, revealing a dark corridor lit only by luminescent crystals embedded in the walls. What do you do?",
+      "name": "Storyteller",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 20, 2024  14:10:00"
+    },
+    {
+      "mes": "I carefully step inside and let my eyes adjust to the light. I'm looking for anything that might indicate which way to go or any immediate dangers.",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 20, 2024  14:15:00"
+    },
+    {
+      "mes": "[Checkpoint created]",
+      "name": "System",
+      "is_user": false,
+      "is_system": true,
+      "is_name": false,
+      "send_date": "January 20, 2024  14:20:00",
+      "extra": {
+        "bookmark_link": "chat_branch"
+      }
+    },
+    {
+      "mes": "Your eyes gradually adjust and you notice three distinct paths before you. The left path has fresh air flowing through it. The center path is marked with ancient symbols glowing faintly. The right path descends deeper underground, and you hear the distant sound of running water. Which path interests you most?",
+      "name": "Storyteller",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 20, 2024  14:25:00"
+    },
+    {
+      "mes": "I choose the center path with the glowing symbols. Ancient symbols usually indicate important locations or treasure!",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 20, 2024  14:30:00"
+    },
+    {
+      "mes": "A wise decision! The symbols grow brighter as you approach, forming a path of light through the darkness. You enter a grand chamber with a massive stone door at the far end. In the center sits an ornate pedestal holding a crystalline orb that pulses with an inner light. The moment you enter, the orb's pulsing quickens. Ancient machinery begins to whir around you.",
+      "name": "Storyteller",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 20, 2024  14:35:00"
+    },
+    {
+      "mes": "That's incredible! What happens next? Does touching the orb unlock the door?",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 20, 2024  14:40:00"
+    }
+  ],
+  "chat_branch.jsonl": [
+    {
+      "mes": "Ah, welcome! I sense you're ready for an epic adventure. What kind of quest calls to you? A journey through enchanted forests, perhaps? Or maybe scaling mountains to find a legendary artifact?",
+      "name": "Storyteller",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 20, 2024  14:00:00"
+    },
+    {
+      "mes": "I'd love a story about exploring a mysterious ancient temple! Can you make it thrilling with plenty of puzzles and treasures?",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 20, 2024  14:05:00"
+    },
+    {
+      "mes": "Excellent choice! Picture this: You stand before towering stone gates covered in moss and vines. Intricate carvings of long-forgotten civilizations adorn the entrance. As you step forward, the ground trembles. The gates slowly creak open, revealing a dark corridor lit only by luminescent crystals embedded in the walls. What do you do?",
+      "name": "Storyteller",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 20, 2024  14:10:00"
+    },
+    {
+      "mes": "I carefully step inside and let my eyes adjust to the light. I'm looking for anything that might indicate which way to go or any immediate dangers.",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 20, 2024  14:15:00"
+    },
+    {
+      "mes": "[Checkpoint created]",
+      "name": "System",
+      "is_user": false,
+      "is_system": true,
+      "is_name": false,
+      "send_date": "January 20, 2024  14:20:00",
+      "extra": {
+        "bookmark_link": "chat_branch"
+      }
+    },
+    {
+      "mes": "As your eyes adjust, you hear a strange whisper echoing through the temple. The luminescent crystals begin to flicker ominously. Suddenly, stone walls start closing in from both sides! You have mere seconds to act. Do you run forward, backward, or try to climb upward to escape?",
+      "name": "Storyteller",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 20, 2024  14:25:00"
+    },
+    {
+      "mes": "I sprint forward as fast as I can! I'll try to outrun the closing walls and find safety ahead in the temple.",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 20, 2024  14:30:00"
+    }
+  ]
+}

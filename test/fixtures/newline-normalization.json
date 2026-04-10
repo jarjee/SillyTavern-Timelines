@@ -1,0 +1,38 @@
+{
+  "chat_crlf.jsonl": [
+    {
+      "mes": "Hello!\r\nHow are you?",
+      "name": "Bot",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:00:00"
+    },
+    {
+      "mes": "I am fine.\r\nThank you!",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:01:00"
+    }
+  ],
+  "chat_lf.jsonl": [
+    {
+      "mes": "Hello!\nHow are you?",
+      "name": "Bot",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 2, 2024  12:00:00"
+    },
+    {
+      "mes": "I am fine.\nThank you!",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 2, 2024  12:01:00"
+    }
+  ]
+}

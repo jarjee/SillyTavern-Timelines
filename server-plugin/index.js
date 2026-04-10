@@ -328,10 +328,12 @@ function buildGraph(allChats, allChatFileNamesAndLengths) {
         },
     });
 
-    // Initialize previousNodes
-    allChats[0].forEach(({ file_name }) => {
-        previousNodes[file_name] = 'root';
-    });
+    // Initialize previousNodes (guard for empty allChats)
+    if (allChats.length > 0) {
+        allChats[0].forEach(({ file_name }) => {
+            previousNodes[file_name] = 'root';
+        });
+    }
 
     // Process each message depth
     for (let messageId = 0; messageId < allChats.length; messageId++) {
@@ -764,3 +766,11 @@ const info = {
 };
 
 export { init, exit, info };
+
+export const _testExports = {
+    sfc32, cyrb128, generateUniqueColor,
+    preprocessChatSessions, groupMessagesByContent, createNode,
+    buildGraph, convertToCytoscapeElements, highlightCheckpointPaths,
+    computeLayout, formatFileSize, getCacheKey, isCacheValid,
+    responseCache, CACHE_TTL,
+};

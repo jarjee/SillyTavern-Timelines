@@ -1,0 +1,12 @@
+{
+  "chat_001.jsonl": [
+    {
+      "mes": "Hello! How can I help you today?",
+      "name": "Assistant",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:00:00"
+    }
+  ]
+}

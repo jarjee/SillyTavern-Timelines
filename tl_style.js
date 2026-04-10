@@ -319,3 +319,5 @@ export function restoreElements(cy) {
         'underlay-shape': '',
     });
 }
+
+export const _testExports = { highlightPathToRoot, getAlphaFromRGBA };
