@@ -22,10 +22,35 @@ function getAlphaFromRGBA(rgbaString) {
  * @param {number} currentHighlightThickness - The starting thickness for highlighting edges (default is 4).
  * @param {number} startingZIndex - The starting zIndex for nodes and edges to be highlighted (default is 1000).
  */
+// Cached indexes for highlightPathToRoot (built once per setupStylesAndData call)
+let _highlightNodeById = null;
+let _highlightEdgeByTarget = null;
+
+/**
+ * Build indexes for O(1) lookup during highlighting. Called once before
+ * iterating bookmark nodes, avoids O(N) linear scans per path step.
+ */
+function buildHighlightIndex(rawData) {
+    _highlightNodeById = new Map();
+    _highlightEdgeByTarget = new Map();
+    for (const entry of Object.values(rawData)) {
+        if (entry.group === 'nodes') {
+            _highlightNodeById.set(entry.data.id, entry);
+        } else if (entry.group === 'edges') {
+            _highlightEdgeByTarget.set(entry.data.target, entry);
+        }
+    }
+}
+
+function clearHighlightIndex() {
+    _highlightNodeById = null;
+    _highlightEdgeByTarget = null;
+}
+
 function highlightPathToRoot(rawData, bookmarkNodeId, currentHighlightThickness = 4, startingZIndex = 1000) {
-    let bookmarkNode = Object.values(rawData).find(entry =>
-        entry.group === 'nodes' && entry.data.id === bookmarkNodeId,
-    );
+    let bookmarkNode = _highlightNodeById
+        ? _highlightNodeById.get(bookmarkNodeId)
+        : Object.values(rawData).find(entry => entry.group === 'nodes' && entry.data.id === bookmarkNodeId);
 
     if (!bookmarkNode) {
         console.error('Checkpoint node not found!');
@@ -40,9 +65,9 @@ function highlightPathToRoot(rawData, bookmarkNodeId, currentHighlightThickness 
             break; // exit from the while loop
         }
 
-        let incomingEdge = Object.values(rawData).find(entry =>
-            entry.group === 'edges' && entry.data.target === currentNode.data.id,
-        );
+        let incomingEdge = _highlightEdgeByTarget
+            ? _highlightEdgeByTarget.get(currentNode.data.id)
+            : Object.values(rawData).find(entry => entry.group === 'edges' && entry.data.target === currentNode.data.id);
 
         if (incomingEdge) {
             incomingEdge.data.isHighlight = true;
@@ -58,9 +83,9 @@ function highlightPathToRoot(rawData, bookmarkNodeId, currentHighlightThickness 
             currentZIndex++; // Increase the zIndex for the next edge in the path
 
             // Select the next node up
-            currentNode = Object.values(rawData).find(entry =>
-                entry.group === 'nodes' && entry.data.id === incomingEdge.data.source,
-            );
+            currentNode = _highlightNodeById
+                ? _highlightNodeById.get(incomingEdge.data.source)
+                : Object.values(rawData).find(entry => entry.group === 'nodes' && entry.data.id === incomingEdge.data.source);
         } else {  // This was the topmost node
             currentNode = null;
         }
@@ -76,7 +101,7 @@ function highlightPathToRoot(rawData, bookmarkNodeId, currentHighlightThickness 
  * @param {Object} nodeData - Data structure representing the graph with nodes and edges.
  * @returns {Array} An array of style definitions suitable for use with Cytoscape.
  */
-export function setupStylesAndData(nodeData) {
+export function setupStylesAndData(nodeData, skipHighlighting = false) {
     const context = getContext();
     let selected_group = context.groupId;
     let group = context.groups.find(group => group.id === selected_group);
@@ -101,11 +126,16 @@ export function setupStylesAndData(nodeData) {
         theme.bookmarkColor = extension_settings.timeline.bookmarkColor;
     }
 
-    Object.values(nodeData).forEach(entry => {
-        if (entry.group === 'nodes' && entry.data.isBookmark) {
-            highlightPathToRoot(nodeData, entry.data.id);
-        }
-    });
+    // Apply checkpoint path highlighting (unless the server already did it)
+    if (!skipHighlighting) {
+        buildHighlightIndex(nodeData);
+        Object.values(nodeData).forEach(entry => {
+            if (entry.group === 'nodes' && entry.data.isBookmark) {
+                highlightPathToRoot(nodeData, entry.data.id);
+            }
+        });
+        clearHighlightIndex();
+    }
 
     const cytoscapeStyles = [
         {
@@ -289,3 +319,5 @@ export function restoreElements(cy) {
         'underlay-shape': '',
     });
 }
+
+export const _testExports = { highlightPathToRoot, getAlphaFromRGBA };

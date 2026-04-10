@@ -1,26 +1,33 @@
 import path from 'path';
 import fs from 'fs/promises';
+import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// dagre.js is a UMD bundle — use createRequire to import it from the extension root
+const require = createRequire(import.meta.url);
+const dagre = require(path.resolve(__dirname, '../dagre.js'));
 
 /**
  * Response cache with TTL (Time To Live)
  * Stores cached responses for quick repeated requests
  */
 const responseCache = new Map();
-const swipeCache = new Map();
 const CACHE_TTL = 30000; // 30 seconds in milliseconds
 
 /**
- * Get or create cache key for a character/group combination
+ * Get or create cache key for a character/group/layout combination
  * @param {string} characterId - Avatar URL (for individual) or group ID
  * @param {boolean} isGroup - Whether this is a group chat
+ * @param {Object} layoutSettings - Layout settings that affect the graph
+ * @param {string} userHandle - User handle for multi-user isolation
  * @returns {string} Cache key
  */
-function getCacheKey(characterId, isGroup) {
-    return `${isGroup ? 'group' : 'char'}:${characterId}`;
+function getCacheKey(characterId, isGroup, layoutSettings, userHandle = '') {
+    const layoutHash = layoutSettings ? JSON.stringify(layoutSettings) : '';
+    return `${userHandle}:${isGroup ? 'group' : 'char'}:${characterId}:${layoutHash}`;
 }
 
 /**
@@ -47,42 +54,18 @@ async function fileExists(filePath) {
 }
 
 /**
- * Get the appropriate chat directory path
- * Supports both single-user and multi-user SillyTavern setups
+ * Resolve chat directory from request user directories.
+ * Mirrors the pattern in SillyTavern's own endpoints/chats.js.
+ * @param {Object} userDirectories - req.user.directories
  * @param {string} avatar_url - The character avatar filename
  * @param {boolean} is_group - Whether this is a group chat
- * @returns {Promise<string>} Path to the chat directory
+ * @returns {string} Path to the chat directory
  */
-async function resolveChatDirectory(avatar_url, is_group) {
-    const serverRoot = path.resolve(__dirname, '../../');
-    const dataDir = path.join(serverRoot, 'data');
-
-    let userDir = 'default-user';
-
-    try {
-        if (await fileExists(dataDir)) {
-            const entries = await fs.readdir(dataDir, { withFileTypes: true });
-            const userDirs = entries
-                .filter(entry => entry.isDirectory())
-                .filter(entry => !entry.name.startsWith('_'))
-                .filter(entry => !entry.name.startsWith('.'));
-
-            if (userDirs.length > 0) {
-                userDir = userDirs[0].name;
-            }
-        }
-    } catch (e) {
-        console.warn('[timelines-data] Could not read user directories:', e.message);
-    }
-
-    const chatsBaseDir = path.join(dataDir, userDir, 'chats');
-
+function resolveChatDirectory(userDirectories, avatar_url, is_group) {
     if (is_group) {
-        return path.join(chatsBaseDir, 'group_chats');
-    } else {
-        const characterName = String(avatar_url).replace('.png', '').replace('.jpg', '').replace('.jpeg', '');
-        return path.join(chatsBaseDir, characterName);
+        return userDirectories.groupChats;
     }
+    return path.join(userDirectories.chats, String(avatar_url).replace('.png', ''));
 }
 
 /**
@@ -288,10 +271,9 @@ function createNode(nodeId, messageId, text, group, allChatFileNamesAndLengths) 
  * Build DAG from preprocessed chats
  * @param {Array} allChats - Transposed chat structure
  * @param {Object} allChatFileNamesAndLengths - Chat lengths
- * @param {string} cacheKey - Key for swipe storage
  * @returns {Array} Cytoscape elements
  */
-function buildGraph(allChats, allChatFileNamesAndLengths, cacheKey) {
+function buildGraph(allChats, allChatFileNamesAndLengths) {
     let cyElements = [];
     let keyCounter = 1;
     let previousNodes = {};
@@ -323,10 +305,12 @@ function buildGraph(allChats, allChatFileNamesAndLengths, cacheKey) {
         },
     });
 
-    // Initialize previousNodes
-    allChats[0].forEach(({ file_name }) => {
-        previousNodes[file_name] = 'root';
-    });
+    // Initialize previousNodes (guard for empty allChats)
+    if (allChats.length > 0) {
+        allChats[0].forEach(({ file_name }) => {
+            previousNodes[file_name] = 'root';
+        });
+    }
 
     // Process each message depth
     for (let messageId = 0; messageId < allChats.length; messageId++) {
@@ -419,78 +403,15 @@ function buildGraph(allChats, allChatFileNamesAndLengths, cacheKey) {
         }
     });
 
-    // Store swipes in cache for lazy loading
-    swipeCache.set(cacheKey, {
-        data: parentSwipeData,
-        timestamp: Date.now()
-    });
-
     return cyElements;
-}
-
-/**
- * Highlight checkpoint paths
- * @param {Array} rawData - Cytoscape elements
- * @returns {Array} Modified elements
- */
-function highlightCheckpointPaths(rawData) {
-    // Find all checkpoint nodes
-    const bookmarkNodes = rawData.filter(entry =>
-        entry.group === 'nodes' && entry.data.isBookmark
-    );
-
-    // Highlight path from each checkpoint to root
-    bookmarkNodes.forEach(bookmarkNode => {
-        let currentNode = bookmarkNode;
-        let currentZIndex = 1000;
-        let currentHighlightThickness = 4;
-
-        while (currentNode) {
-            // Stop if we hit another checkpoint
-            if (currentNode !== bookmarkNode && currentNode.data.isBookmark) {
-                break;
-            }
-
-            // Find incoming edge
-            let incomingEdge = rawData.find(entry =>
-                entry.group === 'edges' && entry.data.target === currentNode.data.id
-            );
-
-            if (incomingEdge) {
-                // Color the edge
-                incomingEdge.data.isHighlight = true;
-                incomingEdge.data.color = bookmarkNode.data.color;
-                incomingEdge.data.bookmarkName = bookmarkNode.data.bookmarkName;
-                incomingEdge.data.highlightThickness = currentHighlightThickness;
-                currentHighlightThickness = Math.min(currentHighlightThickness + 0.1, 6);
-
-                // Color the node border
-                currentNode.data.borderColor = incomingEdge.data.color;
-
-                // Adjust z-index for layering
-                incomingEdge.data.zIndex = currentZIndex;
-                currentZIndex++;
-
-                // Move to parent node
-                currentNode = rawData.find(entry =>
-                    entry.group === 'nodes' && entry.data.id === incomingEdge.data.source
-                );
-            } else {
-                currentNode = null; // Reached root
-            }
-        }
-    });
-
-    return rawData;
 }
 
 /**
  * Convert chat history to Cytoscape elements
  * @param {Object} chatHistory - {file_name: [messages]}
- * @param {string} cacheKey - Key for swipe cache
  * @returns {Array} Cytoscape elements
  */
-function convertToCytoscapeElements(chatHistory, cacheKey) {
+function convertToCytoscapeElements(chatHistory) {
     let allChats = preprocessChatSessions(chatHistory);
 
     // Get chat lengths
@@ -499,8 +420,148 @@ function convertToCytoscapeElements(chatHistory, cacheKey) {
         allChatFileNamesAndLengths[key] = val.length;
     }
 
-    let elements = buildGraph(allChats, allChatFileNamesAndLengths, cacheKey);
+    let elements = buildGraph(allChats, allChatFileNamesAndLengths);
     elements = highlightCheckpointPaths(elements);
+    return elements;
+}
+
+// ============================================================================
+// POST-PROCESSING: HIGHLIGHTING & LAYOUT
+// ============================================================================
+
+/**
+ * Highlight checkpoint paths from each bookmark node to the root.
+ * Identical to the frontend's highlightPathToRoot in tl_style.js,
+ * applied to each bookmark node.
+ * @param {Array} rawData - Cytoscape elements
+ * @returns {Array} Modified elements (mutated in place)
+ */
+function highlightCheckpointPaths(rawData) {
+    const bookmarkNodes = rawData.filter(entry =>
+        entry.group === 'nodes' && entry.data.isBookmark
+    );
+
+    // Build indexes for O(1) lookup instead of O(N) linear scans
+    const nodeById = new Map();
+    const edgeByTarget = new Map();
+    for (const entry of rawData) {
+        if (entry.group === 'nodes') {
+            nodeById.set(entry.data.id, entry);
+        } else if (entry.group === 'edges') {
+            edgeByTarget.set(entry.data.target, entry);
+        }
+    }
+
+    bookmarkNodes.forEach(bookmarkNode => {
+        let currentNode = bookmarkNode;
+        let currentZIndex = 1000;
+        let currentHighlightThickness = 4;
+
+        while (currentNode) {
+            if (currentNode !== bookmarkNode && currentNode.data.isBookmark) {
+                break;
+            }
+
+            let incomingEdge = edgeByTarget.get(currentNode.data.id);
+
+            if (incomingEdge) {
+                incomingEdge.data.isHighlight = true;
+                incomingEdge.data.color = bookmarkNode.data.color;
+                incomingEdge.data.bookmarkName = bookmarkNode.data.bookmarkName;
+                incomingEdge.data.highlightThickness = currentHighlightThickness;
+                currentHighlightThickness = Math.min(currentHighlightThickness + 0.1, 6);
+
+                currentNode.data.borderColor = incomingEdge.data.color;
+
+                incomingEdge.data.zIndex = currentZIndex;
+                currentZIndex++;
+
+                currentNode = nodeById.get(incomingEdge.data.source);
+            } else {
+                currentNode = null;
+            }
+        }
+    });
+
+    return rawData;
+}
+
+/**
+ * Compute dagre layout positions server-side and bake them into elements.
+ * Replicates the exact behavior of cytoscape-dagre so positions match.
+ *
+ * @param {Array} elements - Cytoscape elements (nodes and edges)
+ * @param {Object} layoutSettings - Layout configuration from the frontend
+ * @returns {Array} Elements with position data baked in
+ */
+function computeLayout(elements, layoutSettings) {
+    const g = new dagre.graphlib.Graph({ multigraph: true, compound: true });
+
+    const gObj = {};
+    if (layoutSettings.nodeSep != null) gObj.nodesep = layoutSettings.nodeSep;
+    if (layoutSettings.edgeSep != null) gObj.edgesep = layoutSettings.edgeSep;
+    if (layoutSettings.rankSep != null) gObj.ranksep = layoutSettings.rankSep;
+    if (layoutSettings.rankDir != null) gObj.rankdir = layoutSettings.rankDir;
+    if (layoutSettings.align != null) gObj.align = layoutSettings.align;
+    if (layoutSettings.ranker != null) gObj.ranker = layoutSettings.ranker;
+    if (layoutSettings.acyclicer != null) gObj.acyclicer = layoutSettings.acyclicer;
+    g.setGraph(gObj);
+    g.setDefaultEdgeLabel(function () { return {}; });
+    g.setDefaultNodeLabel(function () { return {}; });
+
+    const defaultNodeWidth = layoutSettings.nodeWidth || 25;
+    const defaultNodeHeight = layoutSettings.nodeHeight || 25;
+    const avatarAsRoot = layoutSettings.avatarAsRoot !== false;
+    const swipeScale = layoutSettings.swipeScale || false;
+    const spacingFactor = layoutSettings.spacingFactor || 1;
+
+    // Collect nodes, sorted by id (replicating cytoscape-dagre's sort behavior)
+    const nodes = elements
+        .filter(e => e.group === 'nodes')
+        .sort((a, b) => a.data.id < b.data.id ? -1 : a.data.id > b.data.id ? 1 : 0);
+
+    const edges = elements.filter(e => e.group === 'edges');
+
+    // Add nodes to dagre graph with dimensions matching what Cytoscape would compute
+    for (const node of nodes) {
+        let w, h;
+        if (node.data.label === 'root') {
+            // Root node dimensions match tl_style.js root node selector
+            w = avatarAsRoot ? 40 : defaultNodeWidth;
+            h = avatarAsRoot ? 50 : defaultNodeHeight;
+        } else {
+            // Replicate swipeScale logic from tl_style.js node selector
+            let totalSwipes = Number(node.data.totalSwipes);
+            if (isNaN(totalSwipes)) totalSwipes = 0;
+            w = swipeScale ? Math.abs(Math.log(totalSwipes + 1)) * 4 + defaultNodeWidth : defaultNodeWidth;
+            h = swipeScale ? Math.abs(Math.log(totalSwipes + 1)) * 4 + defaultNodeHeight : defaultNodeHeight;
+        }
+        g.setNode(node.data.id, { width: w, height: h, name: node.data.id });
+    }
+
+    // Add edges to dagre graph (multigraph: use edge id as name)
+    for (const edge of edges) {
+        g.setEdge(edge.data.source, edge.data.target, {
+            minlen: 1,
+            weight: 1,
+            name: edge.data.id,
+        }, edge.data.id);
+    }
+
+    // Run dagre layout
+    dagre.layout(g);
+
+    // Bake positions into element data, applying spacingFactor
+    for (const node of nodes) {
+        const pos = g.node(node.data.id);
+        if (pos) {
+            node.position = {
+                x: pos.x * spacingFactor,
+                y: pos.y * spacingFactor,
+            };
+        }
+    }
+
     return elements;
 }
 
@@ -520,7 +581,7 @@ async function init(router) {
      */
     router.post('/bulk-fetch', async (req, res) => {
         try {
-            const { avatar_url, is_group = false } = req.body;
+            const { avatar_url, is_group = false, layout_settings } = req.body;
 
             if (!avatar_url) {
                 return res.status(400).json({
@@ -528,7 +589,8 @@ async function init(router) {
                 });
             }
 
-            const cacheKey = getCacheKey(avatar_url, is_group);
+            const userHandle = req.user?.profile?.handle ?? '';
+            const cacheKey = getCacheKey(avatar_url, is_group, layout_settings, userHandle);
 
             // Check cache first
             const cached = responseCache.get(cacheKey);
@@ -536,8 +598,8 @@ async function init(router) {
                 return res.json(cached.data);
             }
 
-            // Resolve chat directory
-            const chatDirectory = await resolveChatDirectory(avatar_url, is_group);
+            // Resolve chat directory from the authenticated user's directories
+            const chatDirectory = resolveChatDirectory(req.user.directories, avatar_url, is_group);
 
             const result = {
                 chats: {},
@@ -547,7 +609,7 @@ async function init(router) {
             // Check if directory exists
             if (!(await fileExists(chatDirectory))) {
                 console.warn('[timelines-data] Chat directory does not exist:', chatDirectory);
-                return res.json(result);
+                return res.json({ graph: [], metadata: {}, serverComputed: false });
             }
 
             // Read directory of chats
@@ -573,8 +635,10 @@ async function init(router) {
                         }
                     }).filter(msg => msg !== null);
 
-                    // Remove metadata line for individual chats
-                    if (!is_group && messages.length > 0 && (!messages[0].mes || messages[0].chat_metadata)) {
+                    // Remove metadata line for individual chats.
+                    // The first line of a .jsonl chat file is always metadata for non-group chats,
+                    // matching the frontend behavior where currentChat.shift() is unconditional.
+                    if (!is_group && messages.length > 0) {
                         messages.shift();
                     }
 
@@ -597,19 +661,19 @@ async function init(router) {
             }));
 
             // Build graph server-side
-            const graphElements = convertToCytoscapeElements(result.chats, cacheKey);
+            let graphElements = convertToCytoscapeElements(result.chats);
 
-            // Strip swipes from response to reduce size - they'll be lazy-loaded via /swipes/:nodeId
-            graphElements.forEach(element => {
-                if (element.group === 'nodes' && element.data.storedSwipes) {
-                    delete element.data.storedSwipes;
-                    // Keep totalSwipes and currentSwipeIndex for UI
-                }
-            });
+            // Compute layout positions if layout settings were provided
+            let serverComputed = false;
+            if (layout_settings) {
+                graphElements = computeLayout(graphElements, layout_settings);
+                serverComputed = true;
+            }
 
             const response = {
                 graph: graphElements,
-                metadata: result.metadata
+                metadata: result.metadata,
+                serverComputed: serverComputed,
             };
 
             // Cache the response
@@ -629,58 +693,25 @@ async function init(router) {
     });
 
     /**
-     * Lazy-load swipes for a specific node
-     * GET /api/plugins/timelines-data/swipes/:nodeId
-     */
-    router.get('/swipes/:nodeId', (req, res) => {
-        try {
-            const { nodeId } = req.params;
-            const { cacheKey } = req.query;
-
-            if (!cacheKey) {
-                return res.status(400).json({
-                    error: 'Missing required query parameter: cacheKey'
-                });
-            }
-
-            const cached = swipeCache.get(cacheKey);
-            if (!isCacheValid(cached)) {
-                return res.status(404).json({
-                    error: 'Swipe data not found or expired'
-                });
-            }
-
-            const swipeData = cached.data[nodeId];
-            if (!swipeData) {
-                return res.json({ swipes: [] });
-            }
-
-            res.json({
-                swipes: swipeData.storedSwipes,
-                totalSwipes: swipeData.totalSwipes,
-                currentSwipeIndex: swipeData.currentSwipeIndex
-            });
-        } catch (error) {
-            console.error('[timelines-data] Error in swipes endpoint:', error);
-            res.status(500).json({ error: error.message });
-        }
-    });
-
-    /**
      * Invalidate cache
      * POST /api/plugins/timelines-data/invalidate-cache
      */
     router.post('/invalidate-cache', (req, res) => {
         try {
             const { avatar_url, is_group } = req.body;
+            const userHandle = req.user?.profile?.handle ?? '';
 
             if (avatar_url) {
-                const cacheKey = getCacheKey(avatar_url, is_group);
-                responseCache.delete(cacheKey);
-                swipeCache.delete(cacheKey);
+                // Clear all cache entries for this character/group
+                // (may have multiple entries for different layout settings)
+                const prefix = `${userHandle}:${is_group ? 'group' : 'char'}:${avatar_url}:`;
+                for (const key of responseCache.keys()) {
+                    if (key.startsWith(prefix)) {
+                        responseCache.delete(key);
+                    }
+                }
             } else {
                 responseCache.clear();
-                swipeCache.clear();
             }
 
             res.json({ success: true });
@@ -700,7 +731,6 @@ async function init(router) {
  */
 async function exit() {
     responseCache.clear();
-    swipeCache.clear();
     console.log('[timelines-data] Plugin unloaded.');
     return Promise.resolve();
 }
@@ -715,3 +745,12 @@ const info = {
 };
 
 export { init, exit, info };
+
+export const _testExports = {
+    sfc32, cyrb128, generateUniqueColor,
+    preprocessChatSessions, groupMessagesByContent, createNode,
+    buildGraph, convertToCytoscapeElements, highlightCheckpointPaths,
+    computeLayout, formatFileSize, getCacheKey, isCacheValid,
+    resolveChatDirectory,
+    responseCache, CACHE_TTL,
+};

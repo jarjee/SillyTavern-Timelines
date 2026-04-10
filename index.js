@@ -103,8 +103,10 @@ let defaultSettings = {
 let currentlyHighlighted = null;  // selector for active legend item
 let lastContext = null;  // for tracking whether we need to refresh the graph
 let lastTimelineData = null;  // last fetched and prepared timeline data
+let lastServerComputed = false;  // whether the server computed layout + highlighting
 let theCy = null;  // Cytoscape instance
 let layout = {};  // Cytoscape graph layout configuration; populated later in `updateTimelineDataIfNeeded`
+let dagreLayout = {};  // Dagre layout config; always populated for re-layout (orientation/swipe toggle)
 
 /**
  * Asynchronously loads settings from `extension_settings.timeline`,
@@ -397,8 +399,12 @@ function makeNodeTippy(node) {
  * 7. Handle newlines and special characters within <code> tags.
  */
 
+const _formatCache = new Map();
 function formatNodeMessage(mes) {
     if (mes == null) return '';
+    const cached = _formatCache.get(mes);
+    if (cached !== undefined) return cached;
+    const originalInput = mes;
     mes = fixMarkdown(mes);
     mes = mes.replaceAll('<', '&lt;').replaceAll('>', '&gt;');
     mes = mes.replace(/```[\s\S]*?```|``[\s\S]*?``|`[\s\S]*?`|(\".+?\")|(\u201C.+?\u201D)/gm, function (match, p1, p2) {
@@ -436,6 +442,7 @@ function formatNodeMessage(mes) {
         return match.replace(/&amp;/g, '&');
     });
 
+    _formatCache.set(originalInput, mes);
     return mes;
 }
 
@@ -1014,26 +1021,29 @@ function toggleSwipes(cy, visible) {
     const swipeNodes = cy.nodes('[?isSwipe]');
     const wasVisible = Boolean(swipeNodes.length > 0);
 
-    if (wasVisible) {  // Remove all old swipe nodes and edges, if any
-        swipeNodes.connectedEdges().remove();
-        swipeNodes.remove();
-    }
-
     if (visible === undefined) {  // New `visible` state not specified, toggle
         visible = !wasVisible;
     }
 
-    if (visible) {
-        cy.nodes().forEach(node => {
-            const storedSwipes = node.data('storedSwipes');
-            if (storedSwipes && storedSwipes.length > 0) {
-                storedSwipes.forEach(({ node: swipeNode, edge: swipeEdge }) => {
-                    cy.add({ group: 'nodes', data: swipeNode });
-                    cy.add({ group: 'edges', data: swipeEdge });
-                });
-            }
-        });
-    }
+    // Batch all add/remove operations to avoid re-rendering on each individual change
+    cy.batch(() => {
+        if (wasVisible) {  // Remove all old swipe nodes and edges, if any
+            swipeNodes.connectedEdges().remove();
+            swipeNodes.remove();
+        }
+
+        if (visible) {
+            cy.nodes().forEach(node => {
+                const storedSwipes = node.data('storedSwipes');
+                if (storedSwipes && storedSwipes.length > 0) {
+                    storedSwipes.forEach(({ node: swipeNode, edge: swipeEdge }) => {
+                        cy.add({ group: 'nodes', data: swipeNode });
+                        cy.add({ group: 'edges', data: swipeEdge });
+                    });
+                }
+            });
+        }
+    });
 }
 
 /**
@@ -1091,10 +1101,11 @@ function setupEventHandlers(cy, nodeData) {
     let hasSetOrientation = false;  // Ensure we set the graph orientation only once
     let showTimeout;  // for the tooltip
 
-    // Re-run the graph layout (needed whenever nodes are added/removed)
+    // Re-run the graph layout (needed whenever nodes are added/removed).
+    // Always uses dagre layout, even if initial render used preset positions from server.
     function refreshLayout() {
-        layout.fit = false;
-        const cyLayout = cy.elements().makeLayout(layout);  // TODO: Difference vs. `cy.layout(layout)` (see `setOrientation` in `tl_graph.js`)?
+        dagreLayout.fit = false;
+        const cyLayout = cy.elements().makeLayout(dagreLayout);  // TODO: Difference vs. `cy.layout(layout)` (see `setOrientation` in `tl_graph.js`)?
 
         cy.nodes().forEach(node => { node.unlock(); });
         cyLayout.run();  // apply the layout
@@ -1182,8 +1193,11 @@ function setupEventHandlers(cy, nodeData) {
     }
 
     // The text search field is a garden-variety DOM element, so attach an event listener the classical way.
+    // Debounce input to avoid re-running search + layout on every keystroke.
+    let searchDebounceTimer;
     textSearchElement.addEventListener('input', function (evt) {
-        performTextSearch();
+        clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = setTimeout(performTextSearch, 250);
     });
     textSearchElement.addEventListener('focus', function (evt) {
         performTextSearch();
@@ -1193,7 +1207,7 @@ function setupEventHandlers(cy, nodeData) {
     let modal = document.getElementById('timelinesModal');
     let rotateBtn = modal.getElementsByClassName('rotate')[0];
     rotateBtn.onclick = function () {
-        toggleGraphOrientation(cy, layout);
+        toggleGraphOrientation(cy, dagreLayout);
         refreshLayout();
         const [eles, padding] = filterElementsAndPad(cy, undefined);
         cy.stop().animate({
@@ -1245,7 +1259,7 @@ function setupEventHandlers(cy, nodeData) {
     cy.on('render', function () {
         if (!hasSetOrientation) {
             hasSetOrientation = true;
-            setGraphOrientationBasedOnViewport(cy, layout);
+            setGraphOrientationBasedOnViewport(cy, dagreLayout);
             cy.nodes().forEach(node => { node.lock(); });  // nodes are always locked after running the layout anyway
             fixRootNodePosition(cy);
         }
@@ -1397,20 +1411,22 @@ function setupEventHandlers(cy, nodeData) {
             const firstSwipeId = node.data('storedSwipes')[0].node.id;
             const swipeExists = cy.getElementById(firstSwipeId).length > 0;
 
-            if (!swipeExists) {
-                // For this node, add stored swipes and their edges to the graph
-                node.data('storedSwipes').forEach(({ node: swipeNode, edge: swipeEdge }) => {
-                    // increase the edge weight
-                    swipeEdge.weight = 100;
-                    cy.add({ group: 'nodes', data: swipeNode });
-                    cy.add({ group: 'edges', data: swipeEdge });
-                });
-            } else {
-                // For this node, remove stored swipes and their edges from the graph
-                node.data('storedSwipes').forEach(({ node: swipeNode }) => {
-                    cy.getElementById(swipeNode.id).remove();
-                });
-            }
+            cy.batch(() => {
+                if (!swipeExists) {
+                    // For this node, add stored swipes and their edges to the graph
+                    node.data('storedSwipes').forEach(({ node: swipeNode, edge: swipeEdge }) => {
+                        // increase the edge weight
+                        swipeEdge.weight = 100;
+                        cy.add({ group: 'nodes', data: swipeNode });
+                        cy.add({ group: 'edges', data: swipeEdge });
+                    });
+                } else {
+                    // For this node, remove stored swipes and their edges from the graph
+                    node.data('storedSwipes').forEach(({ node: swipeNode }) => {
+                        cy.getElementById(swipeNode.id).remove();
+                    });
+                }
+            });
 
             refreshLayout();
         }
@@ -1463,7 +1479,7 @@ function setupEventHandlers(cy, nodeData) {
  * @param {Object} nodeData - The data used to render the nodes and edges of the Cytoscape diagram.
  */
 function renderCytoscapeDiagram(nodeData) {
-    const styles = setupStylesAndData(nodeData);
+    const styles = setupStylesAndData(nodeData, lastServerComputed);
     const cy = initializeCytoscape(nodeData, styles);
     if (cy) {
         if (extension_settings.timeline.enableMinZoom) {
@@ -1489,6 +1505,23 @@ async function updateTimelineDataIfNeeded() {
     if (!lastContext || lastContext.characterId !== context.characterId) {
         let data = {};
 
+        // Layout settings to send to the server for server-side layout computation
+        const layoutSettings = {
+            nodeSep: extension_settings.timeline.nodeSeparation,
+            edgeSep: extension_settings.timeline.edgeSeparation,
+            rankSep: extension_settings.timeline.rankSeparation,
+            rankDir: 'LR',
+            ranker: extension_settings.timeline.nodeRanker,
+            spacingFactor: extension_settings.timeline.spacingFactor,
+            acyclicer: 'greedy',
+            align: extension_settings.timeline.align,
+            nodeWidth: extension_settings.timeline.nodeWidth,
+            nodeHeight: extension_settings.timeline.nodeHeight,
+            swipeScale: extension_settings.timeline.swipeScale,
+            avatarAsRoot: extension_settings.timeline.avatarAsRoot,
+        };
+
+        let result;
         if (!context.characterId) {  // group chat
             let groupID = context.groupId;
             if (groupID) {
@@ -1500,20 +1533,26 @@ async function updateTimelineDataIfNeeded() {
                     console.debug(group.chats[i]);
                     data[i] = { 'file_name': group.chats[i] };
                 }
-                lastTimelineData = await prepareData(data, true);
+                result = await prepareData(data, true, layoutSettings);
             }
         }
         else {
             data = await fetchData(context.characters[context.characterId].avatar);
-            lastTimelineData = await prepareData(data);
+            result = await prepareData(data, false, layoutSettings);
+        }
+
+        if (result) {
+            lastTimelineData = result.graph;
+            lastServerComputed = result.serverComputed;
         }
 
         lastContext = context; // Update `lastContext` to the current context
-        console.info('Timeline data updated');
+        console.info(`Timeline data updated (serverComputed: ${lastServerComputed})`);
 
+        // Dagre layout config — always needed for re-layout (orientation toggle, swipe toggle)
         // https://github.com/cytoscape/cytoscape.js-dagre
         // https://js.cytoscape.org/#layouts
-        layout = {
+        dagreLayout = {
             name: 'dagre',
             nodeDimensionsIncludeLabels: true,
             nodeSep: extension_settings.timeline.nodeSeparation,  // Separation between adjacent nodes in the same rank
@@ -1526,6 +1565,18 @@ async function updateTimelineDataIfNeeded() {
             align: extension_settings.timeline.align,  // Alignment for rank nodes. Can be 'UL', 'UR', 'DL', or 'DR', where U = up, D = down, L = left, and R = right
             sort: function (a, b) { return a.id() < b.id() },  // Layout tie-breaker: prefer the element that our `buildGraph` created first.
         };
+
+        // If server computed positions, use preset layout for initial render;
+        // otherwise fall back to dagre layout.
+        if (lastServerComputed) {
+            layout = {
+                name: 'preset',
+                // Cytoscape reads positions from element.position (already baked in by server)
+            };
+        } else {
+            layout = dagreLayout;
+        }
+
         return true; // Data was updated
     }
     return false; // No update occurred

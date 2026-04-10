@@ -1,0 +1,104 @@
+{
+  "chat_alice.jsonl": [
+    {
+      "mes": "Hello! I'm here to help you with whatever you need.",
+      "name": "Alice",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "March 1, 2024  08:00:00"
+    },
+    {
+      "mes": "Thanks for being here. I appreciate your support.",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "March 1, 2024  08:01:00"
+    },
+    {
+      "mes": "That's wonderful! I'm always happy to listen and help with any questions or concerns you might have about our project.",
+      "name": "Alice",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "March 1, 2024  08:02:00"
+    },
+    {
+      "mes": "Can you tell me more about the timeline?",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "March 1, 2024  08:03:00"
+    }
+  ],
+  "chat_bob.jsonl": [
+    {
+      "mes": "Hello! I'm here to help you with whatever you need.",
+      "name": "Bob",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "March 1, 2024  08:00:00"
+    },
+    {
+      "mes": "Thanks for being here. I appreciate your support.",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "March 1, 2024  08:01:00"
+    },
+    {
+      "mes": "Absolutely! I'm excited to work with you and see what we can accomplish together on this exciting venture.",
+      "name": "Bob",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "March 1, 2024  08:02:00"
+    },
+    {
+      "mes": "When can we start working on this?",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "March 1, 2024  08:03:00"
+    }
+  ],
+  "chat_carol.jsonl": [
+    {
+      "mes": "Hello! I'm here to help you with whatever you need.",
+      "name": "Carol",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "March 1, 2024  08:00:00"
+    },
+    {
+      "mes": "Thanks for being here. I appreciate your support.",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "March 1, 2024  08:01:00"
+    },
+    {
+      "mes": "Of course! I'm delighted to support you and help make your goals a reality with creative solutions.",
+      "name": "Carol",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "March 1, 2024  08:02:00"
+    },
+    {
+      "mes": "What are your thoughts on the budget?",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "March 1, 2024  08:03:00"
+    }
+  ]
+}

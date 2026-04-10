@@ -1,0 +1,269 @@
+{
+  "chat_root.jsonl": [
+    {
+      "mes": "Welcome, brave adventurer! I am your Guide through this mysterious realm. A great challenge awaits you at the crossroads ahead. What do you do?",
+      "name": "Guide",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:00:00"
+    },
+    {
+      "mes": "I'm ready! Let's see what this adventure holds.",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:02:00"
+    },
+    {
+      "mes": "You venture into the misty forest, hearing the distant call of an unknown creature. The path splits into three directions.",
+      "name": "Guide",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:04:00"
+    },
+    {
+      "mes": "Which path calls to you - left, center, or right?",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:06:00"
+    },
+    {
+      "mes": "[CHECKPOINT: Branch point reached. Alternative paths available.]",
+      "name": "System",
+      "is_user": false,
+      "is_system": true,
+      "is_name": false,
+      "send_date": "April 1, 2024  15:08:00",
+      "extra": {
+        "bookmark_link": "chat_branch_A"
+      }
+    },
+    {
+      "mes": "The central path glows with an ethereal blue light, drawing you forward mysteriously.",
+      "name": "Guide",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:10:00"
+    },
+    {
+      "mes": "I feel compelled to follow the light. It seems important.",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:12:00"
+    },
+    {
+      "mes": "As you follow the luminous path, you discover an ancient temple with doors sealed by riddles. Your quest truly begins now!",
+      "name": "Guide",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:14:00"
+    }
+  ],
+  "chat_branch_A.jsonl": [
+    {
+      "mes": "Welcome, brave adventurer! I am your Guide through this mysterious realm. A great challenge awaits you at the crossroads ahead. What do you do?",
+      "name": "Guide",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:00:00"
+    },
+    {
+      "mes": "I'm ready! Let's see what this adventure holds.",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:02:00"
+    },
+    {
+      "mes": "You venture into the misty forest, hearing the distant call of an unknown creature. The path splits into three directions.",
+      "name": "Guide",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:04:00"
+    },
+    {
+      "mes": "Which path calls to you - left, center, or right?",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:06:00"
+    },
+    {
+      "mes": "[CHECKPOINT: Branch point reached. Alternative paths available.]",
+      "name": "System",
+      "is_user": false,
+      "is_system": true,
+      "is_name": false,
+      "send_date": "April 1, 2024  15:08:00",
+      "extra": {
+        "bookmark_link": "chat_branch_A"
+      }
+    },
+    {
+      "mes": "The left path winds through darker woods, and you hear the growl of a great beast. Dragon territory, perhaps?",
+      "name": "Guide",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:10:00"
+    },
+    {
+      "mes": "This is dangerous but exciting! I choose the left path to face the beast!",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:12:00"
+    }
+  ],
+  "chat_branch_B.jsonl": [
+    {
+      "mes": "Welcome, brave adventurer! I am your Guide through this mysterious realm. A great challenge awaits you at the crossroads ahead. What do you do?",
+      "name": "Guide",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:00:00"
+    },
+    {
+      "mes": "I'm ready! Let's see what this adventure holds.",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:02:00"
+    },
+    {
+      "mes": "You climb a steep mountain path instead, finding yourself above the clouds. A village of sky-folk appears before you.",
+      "name": "Guide",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:04:00"
+    },
+    {
+      "mes": "How fascinating! Are they friendly?",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:06:00"
+    },
+    {
+      "mes": "The sky-folk welcome you warmly and offer you an ancient sky-ship to continue your journey beyond the clouds.",
+      "name": "Guide",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:08:00"
+    },
+    {
+      "mes": "This adventure takes an unexpected turn! I accept their offer gratefully.",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:10:00"
+    }
+  ],
+  "chat_swipe_demo.jsonl": [
+    {
+      "mes": "Welcome, brave adventurer! I am your Guide through this mysterious realm. A great challenge awaits you at the crossroads ahead. What do you do?",
+      "name": "Guide",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:00:00"
+    },
+    {
+      "mes": "I'm ready! Let's see what this adventure holds.",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:02:00"
+    },
+    {
+      "mes": "You find yourself in an ancient library filled with glowing books and mysterious scrolls.",
+      "name": "Guide",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:04:00",
+      "swipes": [
+        "You find yourself in an ancient library filled with glowing books and mysterious scrolls.",
+        "The library materializes around you, its walls lined with books that whisper ancient secrets.",
+        "A vast archive of knowledge opens before you, filled with tomes radiating magical light."
+      ],
+      "swipe_id": 0
+    },
+    {
+      "mes": "What knowledge do I seek?",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:06:00"
+    },
+    {
+      "mes": "One tome in particular calls to you - the legendary Codex of Destinies.",
+      "name": "Guide",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:08:00",
+      "swipes": [
+        "One tome in particular calls to you - the legendary Codex of Destinies.",
+        "A single ancient volume glows brighter than all the rest - the Codex of Destinies."
+      ],
+      "swipe_id": 0
+    }
+  ],
+  "chat_solo.jsonl": [
+    {
+      "mes": "Welcome, brave adventurer! I am your Guide through this mysterious realm. A great challenge awaits you at the crossroads ahead. What do you do?",
+      "name": "Guide",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:00:00"
+    },
+    {
+      "mes": "I decide to rest and gather my thoughts before beginning.",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:02:00"
+    },
+    {
+      "mes": "You find a quiet grove where time seems to move differently. Here, you meditate for what feels like years in mere moments.",
+      "name": "Guide",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:04:00"
+    },
+    {
+      "mes": "Enlightened and ready, I emerge from the grove transformed and prepared for any challenge ahead.",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "April 1, 2024  15:06:00"
+    }
+  ]
+}

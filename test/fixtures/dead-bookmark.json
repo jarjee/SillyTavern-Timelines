@@ -1,0 +1,31 @@
+{
+  "chat_main.jsonl": [
+    {
+      "mes": "Hello, let's begin our adventure.",
+      "name": "Narrator",
+      "is_user": false,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:00:00"
+    },
+    {
+      "mes": "What do you want to do?",
+      "name": "User",
+      "is_user": true,
+      "is_system": false,
+      "is_name": true,
+      "send_date": "January 1, 2024  12:01:00"
+    },
+    {
+      "mes": "Checkpoint saved to 'missing_branch'",
+      "name": "System",
+      "is_user": false,
+      "is_system": true,
+      "is_name": false,
+      "send_date": "January 1, 2024  12:02:00",
+      "extra": {
+        "bookmark_link": "missing_branch"
+      }
+    }
+  ]
+}
