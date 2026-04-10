@@ -1,18 +1,22 @@
 import path from 'path';
 import fs from 'fs/promises';
+import { readFileSync } from 'fs';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
+import { createContext, runInContext } from 'vm';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// dagre.js is a UMD bundle — use createRequire to import it from the extension root
-const require = createRequire(import.meta.url);
+// dagre.js is a Browserify UMD bundle designed for browsers. Node's CJS require
+// causes its internal graphlib module to fail (the fallback path references
+// `window` which doesn't exist in Node). Load it via vm with a minimal browser-
+// like context so the UMD's CJS branch sets module.exports correctly.
 const dagrePath = path.resolve(__dirname, '../dagre.js');
-console.log('[timelines-data] __dirname:', __dirname);
-console.log('[timelines-data] dagre.js resolved to:', dagrePath);
-const dagre = require(dagrePath);
-console.log('[timelines-data] dagre loaded, graphlib:', typeof dagre?.graphlib);
+const dagreSrc = readFileSync(dagrePath, 'utf8');
+const dagreCtx = createContext({ module: { exports: {} }, exports: {}, global: {}, window: {}, self: {} });
+runInContext(dagreSrc, dagreCtx);
+const dagre = dagreCtx.module.exports;
 
 /**
  * Response cache with TTL (Time To Live)
