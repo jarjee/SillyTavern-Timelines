@@ -179,11 +179,74 @@ The core algorithm in `buildGraph()` creates a DAG from multiple chat histories:
 - **Cytoscape Context Menus** - Right-click menu support
 - **Cytoscape Popper** - Popper.js integration for positioning
 
-## Testing Checklist
+## Automated Tests
+
+Tests use [Vitest](https://vitest.dev/) and run entirely in Node without SillyTavern installed.
+
+### Running tests
+
+```bash
+npm test                # run all tests once
+npm run test:watch      # re-run on file save
+npm run test:coverage   # run with coverage report
+npm run test:bench      # run performance benchmarks
+```
+
+> **NixOS note**: if `node` isn't on PATH, use the full binary path:
+> `/nix/store/.../bin/node node_modules/.bin/vitest run`
+
+### Test structure
+
+```
+test/
+├── fixtures/           # JSON chat histories used as test inputs
+│   ├── schema.js       # validateFixture() / assertValidFixture()
+│   ├── empty.json      # edge case: no messages
+│   ├── single-message.json
+│   ├── dead-bookmark.json
+│   ├── newline-normalization.json
+│   ├── simple-branching.json   # generated
+│   ├── deep-conversation.json  # generated
+│   ├── checkpoint-tree.json    # generated
+│   ├── swipe-heavy.json        # generated
+│   ├── multi-character.json    # generated
+│   └── complex-tree.json       # generated
+├── stubs/              # minimal no-op shims for SillyTavern imports
+├── unit/               # pure-function tests (sfc32, buildGraph, highlight, …)
+├── parity/             # server vs. client produce identical graph output
+├── integration/        # full convertToCytoscapeElements pipeline
+├── fallback/           # prepareData: server path, 404 fallback, network error
+├── bench/              # vitest bench for buildGraph / layout performance
+└── generate-fixtures.js  # regenerate AI-generated fixtures (needs API key)
+```
+
+### How SillyTavern imports are shimmed
+
+The extension imports from relative paths like `../../../../script.js` (assumes installation inside SillyTavern). `vitest.config.js` aliases those exact import strings to stub files under `test/stubs/`, so no SillyTavern installation is needed.
+
+### Private function access
+
+Graph-building functions are module-private. Each relevant file exposes a `_testExports` object (not part of the public API):
+
+```js
+import { _testExports as server } from './server-plugin/index.js';
+import { _testExports as client } from './tl_node_data.js';
+import { _testExports as clientStyle } from './tl_style.js';
+```
+
+### Adding new tests
+
+- **New fixture**: add a `.json` file to `test/fixtures/`. Run `assertValidFixture()` from `schema.js` on it. Follow the format `{ "filename.jsonl": [...messages] }` where each message has at minimum `name`, `is_user`, `mes`, `send_date`.
+- **Regenerating AI fixtures**: `ANTHROPIC_API_KEY=... node test/generate-fixtures.js` — uses Claude Haiku with structured output to generate realistic conversation trees.
+- **New unit test**: import `_testExports` from the file under test. Use `buildFromFixture(impl, fixture)` helpers where possible to keep both server and client covered.
+- **Parity test**: use `normalizeElements()` (dedup by ID, strip positions) to compare server vs. client output.
+
+### Testing Checklist
 
 When making changes:
 
-- [ ] Changes don't break existing chat visualization
+- [ ] `npm test` passes with no failures
+- [ ] Changes don't break existing chat visualization (manual browser test)
 - [ ] Node clicking opens info panel with correct message text
 - [ ] Double-click navigates to message correctly
 - [ ] Search filtering works with fragment queries (space-separated terms)
