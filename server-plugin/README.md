@@ -7,7 +7,6 @@ This server plugin provides a consolidated endpoint for the SillyTavern-Timeline
 The plugin adds a new endpoint `/api/plugins/timelines-data/bulk-fetch` that:
 - Fetches all chat files for a character/group in one request
 - Builds timeline graph elements server-side (optionally with dagre layout positions)
-- Uses bounded file read/parse concurrency to reduce resource spikes
 - Caches responses for 30 seconds to avoid redundant file I/O
 
 **Performance improvement**: For a character with 10 chats, this reduces **11 requests to 1 request** (~10x fewer requests).
@@ -106,7 +105,6 @@ Or clear all cache:
 
 ## Features
 
-- ✅ **Bounded concurrency**: File reads/parsing run with a capped worker pool
 - ✅ **Response caching**: 30-second TTL to reduce file I/O on repeated requests
 - ✅ **Both chat modes**: Supports individual character and group chats
 - ✅ **Error handling**: Gracefully skips inaccessible files and continues
@@ -117,16 +115,13 @@ Or clear all cache:
 
 Optional environment variables:
 
-- `TIMELINES_FILE_READ_CONCURRENCY`
-  - Controls maximum concurrent chat file read/parse workers.
-  - Default: `8`.
 - `TIMELINES_LAYOUT_DEBUG`
   - Set to `1` to enable extra layout diagnostics in perf logs.
 
 Example:
 
 ```bash
-TIMELINES_LAYOUT_DEBUG=1 TIMELINES_FILE_READ_CONCURRENCY=8 npm start
+TIMELINES_LAYOUT_DEBUG=1 npm start
 ```
 
 ## Troubleshooting
@@ -163,7 +158,7 @@ You don't need to reinstall the extension after installing the plugin—it will 
 
 - **Cache key**: Based on `avatar_url` + `is_group` flag
 - **Cache TTL**: 30 seconds (tunable in `CACHE_TTL` constant)
-- **File reading**: Uses Node.js `fs.promises` with bounded concurrency
+- **File reading**: Uses Node.js `fs.promises` for async I/O
 - **Error handling**: Individual file errors don't block other files from loading
 - **File sorting**: Chats sorted by filename in reverse alphabetical order (newest first)
 
