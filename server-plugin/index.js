@@ -586,13 +586,12 @@ function computeLayout(elements, layoutSettings) {
         g.setNode(node.data.id, { width: w, height: h, name: node.data.id });
     }
 
-    // Add edges to dagre graph (multigraph: use edge id as name)
+    // Add edges to dagre graph
     for (const edge of edges) {
         g.setEdge(edge.data.source, edge.data.target, {
             minlen: 1,
             weight: 1,
-            name: edge.data.id,
-        }, edge.data.id);
+        });
     }
 
     console.log(`[timelines-data] [perf]   computeLayout: graph setup took ${(performance.now() - tSetup).toFixed(1)}ms, dagre graph has ${g.nodeCount()} nodes, ${g.edgeCount()} edges`);
