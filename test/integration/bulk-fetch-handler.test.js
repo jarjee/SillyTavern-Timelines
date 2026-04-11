@@ -203,6 +203,86 @@ describe('bulk-fetch handler: correct path resolution', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Bulk-fetch handler: layout_settings triggers server-side computeLayout
+// ---------------------------------------------------------------------------
+
+const LAYOUT_SETTINGS = {
+    nodeSep: 50, edgeSep: 10, rankSep: 50,
+    rankDir: 'LR', ranker: 'longest-path',
+    spacingFactor: 1, acyclicer: 'greedy', align: undefined,
+    nodeWidth: 25, nodeHeight: 25,
+    swipeScale: false, avatarAsRoot: true,
+};
+
+describe('bulk-fetch handler: layout_settings', () => {
+    it('computes layout for individual chats and returns serverComputed:true with positions', async () => {
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tl-test-'));
+        const charDir = path.join(tmpDir, 'Dungeon master');
+        await fs.mkdir(charDir, { recursive: true });
+        await fs.writeFile(path.join(charDir, 'chat_001.jsonl'), MINIMAL_JSONL, 'utf8');
+
+        responseCache.clear();
+
+        const req = makeReq(
+            { avatar_url: 'Dungeon master.png', is_group: false, layout_settings: LAYOUT_SETTINGS },
+            tmpDir,
+            path.join(tmpDir, 'group chats'),
+        );
+        const res = makeRes();
+
+        await bulkFetchHandler(req, res);
+
+        expect(res._statusCode).toBe(200);
+        expect(res._body.serverComputed).toBe(true);
+
+        const nodes = res._body.graph.filter(e => e.group === 'nodes');
+        expect(nodes.length).toBeGreaterThan(0);
+        for (const node of nodes) {
+            expect(node.position, `node ${node.data.id} missing position`).toBeDefined();
+            expect(typeof node.position.x).toBe('number');
+            expect(typeof node.position.y).toBe('number');
+            expect(Number.isFinite(node.position.x)).toBe(true);
+            expect(Number.isFinite(node.position.y)).toBe(true);
+        }
+
+        await fs.rm(tmpDir, { recursive: true });
+    });
+
+    it('computes layout for group chats and returns serverComputed:true with positions', async () => {
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tl-test-'));
+        const groupChatsDir = path.join(tmpDir, 'group chats');
+        await fs.mkdir(groupChatsDir, { recursive: true });
+
+        const groupMsg = JSON.stringify({ name: 'Bot', is_user: false, is_system: false, is_name: true, mes: 'Hi group', send_date: 'Jan 1', swipes: [] });
+        await fs.writeFile(path.join(groupChatsDir, 'group_001.jsonl'), groupMsg, 'utf8');
+
+        responseCache.clear();
+
+        const req = makeReq(
+            { avatar_url: 'group-id-abc', is_group: true, layout_settings: LAYOUT_SETTINGS },
+            path.join(tmpDir, 'chats'),
+            groupChatsDir,
+        );
+        const res = makeRes();
+
+        await bulkFetchHandler(req, res);
+
+        expect(res._statusCode).toBe(200);
+        expect(res._body.serverComputed).toBe(true);
+
+        const nodes = res._body.graph.filter(e => e.group === 'nodes');
+        expect(nodes.length).toBeGreaterThan(0);
+        for (const node of nodes) {
+            expect(node.position, `node ${node.data.id} missing position`).toBeDefined();
+            expect(Number.isFinite(node.position.x)).toBe(true);
+            expect(Number.isFinite(node.position.y)).toBe(true);
+        }
+
+        await fs.rm(tmpDir, { recursive: true });
+    });
+});
+
+// ---------------------------------------------------------------------------
 // Cache isolation by user handle
 // ---------------------------------------------------------------------------
 

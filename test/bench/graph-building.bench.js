@@ -49,9 +49,17 @@ describe('convertToCytoscapeElements (full pipeline)', () => {
     });
 });
 
+const LAYOUT_SETTINGS = {
+    nodeSep: 50, edgeSep: 10, rankSep: 50,
+    rankDir: 'LR', ranker: 'longest-path',
+    spacingFactor: 1, acyclicer: 'greedy', align: undefined,
+    nodeWidth: 25, nodeHeight: 25,
+    swipeScale: false, avatarAsRoot: true,
+};
+
 describe('computeLayout', () => {
     bench('server - complex-tree', () => {
         const elements = buildServer(complexTree);
-        server.computeLayout(elements);
+        server.computeLayout(elements, LAYOUT_SETTINGS);
     });
 });
