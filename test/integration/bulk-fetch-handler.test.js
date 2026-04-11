@@ -29,9 +29,10 @@ function createMockRouter() {
 }
 
 /** Build a mock Express request */
-function makeReq(body, chatsDir, groupChatsDir, userHandle = 'test-user') {
+function makeReq(body, chatsDir, groupChatsDir, userHandle = 'test-user', headers = {}) {
     return {
         body,
+        headers,
         user: {
             profile: { handle: userHandle },
             directories: {
@@ -325,6 +326,66 @@ describe('bulk-fetch handler: layout_settings', () => {
 
         const edges = res._body.graph.filter(e => e.group === 'edges');
         expect(edges.length).toBeGreaterThan(10);
+
+        await fs.rm(tmpDir, { recursive: true });
+    });
+});
+
+describe('bulk-fetch handler: content encoding', () => {
+    it('sends gzip only when client accepts gzip', async () => {
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tl-test-'));
+        const charDir = path.join(tmpDir, 'Dungeon master');
+        await fs.mkdir(charDir, { recursive: true });
+        await fs.writeFile(path.join(charDir, 'chat_001.jsonl'), MINIMAL_JSONL, 'utf8');
+        responseCache.clear();
+
+        const req = makeReq(
+            { avatar_url: 'Dungeon master.png', is_group: false },
+            tmpDir,
+            path.join(tmpDir, 'group chats'),
+            'test-user',
+            { 'accept-encoding': 'gzip, deflate' },
+        );
+        const res = makeRes();
+
+        await bulkFetchHandler(req, res);
+
+        expect(res._statusCode).toBe(200);
+        expect(res._headers['content-encoding']).toBe('gzip');
+        expect(Array.isArray(res._body.graph)).toBe(true);
+
+        await fs.rm(tmpDir, { recursive: true });
+    });
+
+    it('serves cached response correctly for gzip and plain clients', async () => {
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tl-test-'));
+        const charDir = path.join(tmpDir, 'Dungeon master');
+        await fs.mkdir(charDir, { recursive: true });
+        await fs.writeFile(path.join(charDir, 'chat_001.jsonl'), MINIMAL_JSONL, 'utf8');
+        responseCache.clear();
+
+        const reqGzip = makeReq(
+            { avatar_url: 'Dungeon master.png', is_group: false },
+            tmpDir,
+            path.join(tmpDir, 'group chats'),
+            'test-user',
+            { 'accept-encoding': 'gzip' },
+        );
+        const resGzip = makeRes();
+        await bulkFetchHandler(reqGzip, resGzip);
+        expect(resGzip._headers['content-encoding']).toBe('gzip');
+
+        const reqPlain = makeReq(
+            { avatar_url: 'Dungeon master.png', is_group: false },
+            tmpDir,
+            path.join(tmpDir, 'group chats'),
+        );
+        const resPlain = makeRes();
+        await bulkFetchHandler(reqPlain, resPlain);
+
+        expect(resPlain._statusCode).toBe(200);
+        expect(resPlain._headers['content-encoding']).toBeUndefined();
+        expect(Array.isArray(resPlain._body.graph)).toBe(true);
 
         await fs.rm(tmpDir, { recursive: true });
     });

@@ -7,10 +7,13 @@ let currentOrientation = 'TB';  // starting orientation
  *
  * @param {Object} cy - The Cytoscape instance representing the graph.
  * @param {Object} layout - The Cytoscape layout configuration object.
+ * @param {Object} [options] - Optional behavior flags.
+ * @param {boolean} [options.runLayout=true] - Whether to run the layout immediately.
  */
-export function toggleGraphOrientation(cy, layout) {
+export function toggleGraphOrientation(cy, layout, options = {}) {
+    const { runLayout = true } = options;
     currentOrientation = (currentOrientation === 'LR') ? 'TB' : 'LR';
-    setOrientation(cy, currentOrientation, layout);
+    setOrientation(cy, currentOrientation, layout, runLayout);
 }
 
 /**
@@ -47,10 +50,12 @@ export function getGraphOrientation() {
  * @param {Object} layout - The Cytoscape layout configuration object.
  * @private
  */
-function setOrientation(cy, orientation, layout) {
+function setOrientation(cy, orientation, layout, runLayout = true) {
     // Update layout
     layout.rankDir = orientation;
-    cy.layout(layout).run();
+    if (runLayout) {
+        cy.layout(layout).run();
+    }
     // Update taxi-direction in style
     const taxiDirection = orientation === 'TB' ? 'downward' : 'rightward';
     cy.style().selector('edge').style({

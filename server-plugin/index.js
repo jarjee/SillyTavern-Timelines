@@ -1,10 +1,14 @@
 import path from 'path';
 import fs from 'fs/promises';
 import { readFileSync } from 'fs';
-import { gzipSync } from 'zlib';
-import { createRequire } from 'module';
+import { gzip } from 'zlib';
+import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { createContext, runInContext } from 'vm';
+
+const gzipAsync = promisify(gzip);
+const GZIP_LEVEL = 3;
+const ENABLE_LAYOUT_DIAGNOSTICS = process.env.TIMELINES_LAYOUT_DEBUG === '1';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,6 +50,16 @@ function getCacheKey(characterId, isGroup, layoutSettings, userHandle = '') {
  */
 function isCacheValid(entry) {
     return entry && Date.now() - entry.timestamp < CACHE_TTL;
+}
+
+/**
+ * Check if the request supports gzip-compressed responses.
+ * @param {import('express').Request} req - Express request
+ * @returns {boolean} True if gzip is accepted
+ */
+function clientAcceptsGzip(req) {
+    const acceptEncoding = String(req.headers?.['accept-encoding'] || '');
+    return /\bgzip\b/i.test(acceptEncoding);
 }
 
 /**
@@ -561,13 +575,15 @@ function computeLayout(elements, layoutSettings) {
 
     const edges = elements.filter(e => e.group === 'edges');
 
-    // Count unique node IDs to detect duplicate pushes
-    const uniqueNodeIds = new Set(nodes.map(n => n.data.id));
-    console.log(`[timelines-data] [perf]   computeLayout: ${nodes.length} node elements (${uniqueNodeIds.size} unique IDs), ${edges.length} edges`);
+    if (ENABLE_LAYOUT_DIAGNOSTICS) {
+        // Count unique node IDs to detect duplicate pushes
+        const uniqueNodeIds = new Set(nodes.map(n => n.data.id));
+        console.log(`[timelines-data] [perf]   computeLayout: ${nodes.length} node elements (${uniqueNodeIds.size} unique IDs), ${edges.length} edges`);
 
-    // Count unique edge (source, target) pairs to detect duplicate edges
-    const uniqueEdgePairs = new Set(edges.map(e => `${e.data.source}->${e.data.target}`));
-    console.log(`[timelines-data] [perf]   computeLayout: ${uniqueEdgePairs.size} unique edge pairs (${edges.length - uniqueEdgePairs.size} duplicate edges)`);
+        // Count unique edge (source, target) pairs to detect duplicate edges
+        const uniqueEdgePairs = new Set(edges.map(e => `${e.data.source}->${e.data.target}`));
+        console.log(`[timelines-data] [perf]   computeLayout: ${uniqueEdgePairs.size} unique edge pairs (${edges.length - uniqueEdgePairs.size} duplicate edges)`);
+    }
 
     // Add nodes to dagre graph with dimensions matching what Cytoscape would compute
     for (const node of nodes) {
@@ -636,6 +652,7 @@ async function init(router) {
         try {
             const t0 = performance.now();
             const { avatar_url, is_group = false, layout_settings } = req.body;
+            const shouldGzip = clientAcceptsGzip(req);
 
             if (!avatar_url) {
                 return res.status(400).json({
@@ -652,8 +669,16 @@ async function init(router) {
                 console.log(`[timelines-data] [perf] Cache hit, serving cached response`);
                 const tCacheStart = performance.now();
                 res.setHeader('Content-Type', 'application/json');
-                res.setHeader('Content-Encoding', 'gzip');
-                res.end(cached.data);
+                if (shouldGzip && cached.gzip) {
+                    res.setHeader('Content-Encoding', 'gzip');
+                    res.end(cached.gzip);
+                } else if (cached.json) {
+                    res.end(cached.json);
+                } else {
+                    // Backward compatibility for pre-change cache entries.
+                    res.setHeader('Content-Encoding', 'gzip');
+                    res.end(cached.data);
+                }
                 console.log(`[timelines-data] [perf] Cache hit response took ${(performance.now() - tCacheStart).toFixed(1)}ms`);
                 return;
             }
@@ -748,21 +773,27 @@ async function init(router) {
                 serverComputed: serverComputed,
             };
 
-            // Serialize and compress once; cache the buffer for fast subsequent hits
+            // Serialize once and optionally compress for clients that accept gzip
             const tJson = performance.now();
             const jsonString = JSON.stringify(response);
-            const compressed = gzipSync(jsonString);
-            console.log(`[timelines-data] [perf] JSON serialize + gzip (${(jsonString.length / 1024 / 1024).toFixed(1)}MB -> ${(compressed.length / 1024 / 1024).toFixed(1)}MB) took ${(performance.now() - tJson).toFixed(1)}ms`);
+            const jsonBuffer = Buffer.from(jsonString);
+            const compressed = await gzipAsync(jsonBuffer, { level: GZIP_LEVEL });
+            console.log(`[timelines-data] [perf] JSON serialize + gzip(lv${GZIP_LEVEL}) (${(jsonBuffer.length / 1024 / 1024).toFixed(1)}MB -> ${(compressed.length / 1024 / 1024).toFixed(1)}MB) took ${(performance.now() - tJson).toFixed(1)}ms`);
 
             responseCache.set(cacheKey, {
-                data: compressed,
+                json: jsonBuffer,
+                gzip: compressed,
                 timestamp: Date.now()
             });
 
             const tSend = performance.now();
             res.setHeader('Content-Type', 'application/json');
-            res.setHeader('Content-Encoding', 'gzip');
-            res.end(compressed);
+            if (shouldGzip) {
+                res.setHeader('Content-Encoding', 'gzip');
+                res.end(compressed);
+            } else {
+                res.end(jsonBuffer);
+            }
             console.log(`[timelines-data] [perf] Send took ${(performance.now() - tSend).toFixed(1)}ms`);
             console.log(`[timelines-data] [perf] Total request time: ${(performance.now() - t0).toFixed(1)}ms`);
         } catch (error) {

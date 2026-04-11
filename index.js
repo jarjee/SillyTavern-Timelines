@@ -1207,7 +1207,7 @@ function setupEventHandlers(cy, nodeData) {
     let modal = document.getElementById('timelinesModal');
     let rotateBtn = modal.getElementsByClassName('rotate')[0];
     rotateBtn.onclick = function () {
-        toggleGraphOrientation(cy, dagreLayout);
+        toggleGraphOrientation(cy, dagreLayout, { runLayout: false });
         refreshLayout();
         const [eles, padding] = filterElementsAndPad(cy, undefined);
         cy.stop().animate({
