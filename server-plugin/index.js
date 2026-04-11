@@ -8,6 +8,7 @@ import { createContext, runInContext } from 'vm';
 
 const gzipAsync = promisify(gzip);
 const GZIP_LEVEL = 3;
+const FILE_READ_CONCURRENCY = Number.parseInt(process.env.TIMELINES_FILE_READ_CONCURRENCY || '8', 10) || 8;
 const ENABLE_LAYOUT_DIAGNOSTICS = process.env.TIMELINES_LAYOUT_DEBUG === '1';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -60,6 +61,86 @@ function isCacheValid(entry) {
 function clientAcceptsGzip(req) {
     const acceptEncoding = String(req.headers?.['accept-encoding'] || '');
     return /\bgzip\b/i.test(acceptEncoding);
+}
+
+/**
+ * Parse JSONL chat content in a single pass.
+ * Matches existing behavior by skipping empty lines and logging malformed lines.
+ *
+ * @param {string} content - Raw JSONL file content
+ * @param {string} fileName - Source file name used in parse error logs
+ * @returns {Array<Object>} Parsed message objects
+ */
+function parseJsonlMessages(content, fileName) {
+    const messages = [];
+    const trimmed = content.trim();
+
+    if (trimmed.length === 0) {
+        return messages;
+    }
+
+    let lineIndex = 0;
+    let lineStart = 0;
+    for (let i = 0; i <= trimmed.length; i++) {
+        const isLineBreak = i === trimmed.length || trimmed.charCodeAt(i) === 10; // '\n'
+        if (!isLineBreak) {
+            continue;
+        }
+
+        let line = trimmed.slice(lineStart, i);
+        lineStart = i + 1;
+
+        if (line.endsWith('\r')) {
+            line = line.slice(0, -1);
+        }
+        if (line.length === 0) {
+            continue;
+        }
+
+        try {
+            messages.push(JSON.parse(line));
+        } catch (e) {
+            console.error(`Failed to parse line ${lineIndex} in ${fileName}:`, e.message);
+        }
+        lineIndex++;
+    }
+
+    return messages;
+}
+
+/**
+ * Run async work with bounded concurrency.
+ *
+ * @template T,U
+ * @param {Array<T>} items - Items to process
+ * @param {number} concurrency - Max concurrent workers
+ * @param {(item: T, index: number) => Promise<U>} worker - Async worker function
+ * @returns {Promise<Array<U>>} Results in input order
+ */
+async function mapWithConcurrency(items, concurrency, worker) {
+    const normalizedConcurrency = Math.max(1, concurrency);
+    const results = new Array(items.length);
+    let nextIndex = 0;
+
+    async function runWorker() {
+        while (true) {
+            const currentIndex = nextIndex;
+            nextIndex++;
+            if (currentIndex >= items.length) {
+                return;
+            }
+            results[currentIndex] = await worker(items[currentIndex], currentIndex);
+        }
+    }
+
+    const workers = [];
+    const workerCount = Math.min(normalizedConcurrency, items.length);
+    for (let i = 0; i < workerCount; i++) {
+        workers.push(runWorker());
+    }
+
+    await Promise.all(workers);
+    return results;
 }
 
 /**
@@ -574,15 +655,13 @@ function computeLayout(elements, layoutSettings) {
         .sort((a, b) => a.data.id < b.data.id ? -1 : a.data.id > b.data.id ? 1 : 0);
 
     const edges = elements.filter(e => e.group === 'edges');
+    const uniqueEdgePairs = new Set();
+    let duplicateEdgeCount = 0;
 
     if (ENABLE_LAYOUT_DIAGNOSTICS) {
         // Count unique node IDs to detect duplicate pushes
         const uniqueNodeIds = new Set(nodes.map(n => n.data.id));
         console.log(`[timelines-data] [perf]   computeLayout: ${nodes.length} node elements (${uniqueNodeIds.size} unique IDs), ${edges.length} edges`);
-
-        // Count unique edge (source, target) pairs to detect duplicate edges
-        const uniqueEdgePairs = new Set(edges.map(e => `${e.data.source}->${e.data.target}`));
-        console.log(`[timelines-data] [perf]   computeLayout: ${uniqueEdgePairs.size} unique edge pairs (${edges.length - uniqueEdgePairs.size} duplicate edges)`);
     }
 
     // Add nodes to dagre graph with dimensions matching what Cytoscape would compute
@@ -604,10 +683,24 @@ function computeLayout(elements, layoutSettings) {
 
     // Add edges to dagre graph
     for (const edge of edges) {
+        const edgeKey = `${edge.data.source}\u0000${edge.data.target}`;
+        if (uniqueEdgePairs.has(edgeKey)) {
+            duplicateEdgeCount++;
+            continue;
+        }
+        uniqueEdgePairs.add(edgeKey);
+
         g.setEdge(edge.data.source, edge.data.target, {
             minlen: 1,
             weight: 1,
         });
+    }
+
+    if (ENABLE_LAYOUT_DIAGNOSTICS && duplicateEdgeCount > 0) {
+        console.log(`[timelines-data] [perf]   computeLayout: skipped ${duplicateEdgeCount} duplicate edges before dagre insertion`);
+    }
+    if (ENABLE_LAYOUT_DIAGNOSTICS) {
+        console.log(`[timelines-data] [perf]   computeLayout: ${uniqueEdgePairs.size} unique edge pairs (${duplicateEdgeCount} duplicate edges)`);
     }
 
     console.log(`[timelines-data] [perf]   computeLayout: graph setup took ${(performance.now() - tSetup).toFixed(1)}ms, dagre graph has ${g.nodeCount()} nodes, ${g.edgeCount()} edges`);
@@ -705,26 +798,16 @@ async function init(router) {
                 .sort((a, b) => b.name.localeCompare(a.name));
             console.log(`[timelines-data] [perf] Directory listing (${chatFiles.length} files) took ${(performance.now() - tDirRead).toFixed(1)}ms`);
 
-            // Fetch all chats in parallel
+            // Fetch chats with bounded concurrency
             const tFileRead = performance.now();
             let totalMessages = 0;
             let totalBytes = 0;
-            await Promise.all(chatFiles.map(async (file) => {
+            const chatReadResults = await mapWithConcurrency(chatFiles, FILE_READ_CONCURRENCY, async (file) => {
                 try {
                     const chatPath = path.join(chatDirectory, file.name);
                     const content = await fs.readFile(chatPath, 'utf8');
-                    totalBytes += Buffer.byteLength(content, 'utf8');
-                    const lines = content.trim().split('\n').filter(line => line.length > 0);
-
-                    // Parse chat messages
-                    const messages = lines.map((line, index) => {
-                        try {
-                            return JSON.parse(line);
-                        } catch (e) {
-                            console.error(`Failed to parse line ${index} in ${file.name}:`, e.message);
-                            return null;
-                        }
-                    }).filter(msg => msg !== null);
+                    const bytes = Buffer.byteLength(content, 'utf8');
+                    const messages = parseJsonlMessages(content, file.name);
 
                     // Remove metadata line for individual chats.
                     // The first line of a .jsonl chat file is always metadata for non-group chats,
@@ -733,24 +816,36 @@ async function init(router) {
                         messages.shift();
                     }
 
-                    result.chats[file.name] = messages;
-                    totalMessages += messages.length;
-
                     // Get file stats for metadata
                     const stat = await fs.stat(chatPath);
-                    const messageCount = messages.length;
                     const lastMessage = messages[messages.length - 1];
 
-                    result.metadata[file.name] = {
+                    return {
+                        fileName: file.name,
+                        bytes,
+                        messages,
+                        metadata: {
                         file_size: formatFileSize(stat.size),
-                        chat_items: messageCount,
+                        chat_items: messages.length,
                         mes: lastMessage ? lastMessage.mes : '',
                         last_mes: lastMessage ? lastMessage.send_date : stat.mtimeMs
+                        },
                     };
                 } catch (e) {
                     console.error(`Error reading chat ${file.name}:`, e.message);
+                    return null;
                 }
-            }));
+            });
+
+            for (const chatData of chatReadResults) {
+                if (!chatData) {
+                    continue;
+                }
+                result.chats[chatData.fileName] = chatData.messages;
+                result.metadata[chatData.fileName] = chatData.metadata;
+                totalMessages += chatData.messages.length;
+                totalBytes += chatData.bytes;
+            }
             console.log(`[timelines-data] [perf] File read + parse (${chatFiles.length} files, ${totalMessages} messages, ${(totalBytes / 1024 / 1024).toFixed(1)}MB) took ${(performance.now() - tFileRead).toFixed(1)}ms`);
 
             // Build graph server-side
@@ -861,6 +956,7 @@ export { init, exit, info };
 
 export const _testExports = {
     sfc32, cyrb128, generateUniqueColor,
+    parseJsonlMessages, mapWithConcurrency,
     preprocessChatSessions, groupMessagesByContent, createNode,
     buildGraph, convertToCytoscapeElements, highlightCheckpointPaths,
     computeLayout, formatFileSize, getCacheKey, isCacheValid,

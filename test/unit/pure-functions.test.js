@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { _testExports as server } from '../../server-plugin/index.js';
 
-const { sfc32, cyrb128, generateUniqueColor, formatFileSize, getCacheKey, isCacheValid, CACHE_TTL } = server;
+const { sfc32, cyrb128, generateUniqueColor, parseJsonlMessages, mapWithConcurrency, formatFileSize, getCacheKey, isCacheValid, CACHE_TTL } = server;
 
 describe('sfc32', () => {
     it('returns a function', () => {
@@ -128,6 +128,51 @@ describe('formatFileSize', () => {
 
     it('gigabytes range', () => {
         expect(formatFileSize(1024 * 1024 * 1024)).toMatch(/^[\d.]+gb$/);
+    });
+});
+
+describe('parseJsonlMessages', () => {
+    it('parses valid lines and skips blank lines', () => {
+        const input = '\n{"a":1}\n\n{"b":2}\n';
+        const result = parseJsonlMessages(input, 'chat.jsonl');
+        expect(result).toEqual([{ a: 1 }, { b: 2 }]);
+    });
+
+    it('keeps parsing after malformed lines', () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const input = '{"ok":1}\nnot-json\n{"ok":2}\n';
+
+        const result = parseJsonlMessages(input, 'bad.jsonl');
+
+        expect(result).toEqual([{ ok: 1 }, { ok: 2 }]);
+        expect(errorSpy).toHaveBeenCalledTimes(1);
+        expect(errorSpy.mock.calls[0][0]).toContain('Failed to parse line 1 in bad.jsonl:');
+        errorSpy.mockRestore();
+    });
+});
+
+describe('mapWithConcurrency', () => {
+    it('returns all results in input order', async () => {
+        const result = await mapWithConcurrency([3, 2, 1], 2, async (n) => {
+            await new Promise(resolve => setTimeout(resolve, n * 2));
+            return n * 10;
+        });
+        expect(result).toEqual([30, 20, 10]);
+    });
+
+    it('does not exceed configured concurrency', async () => {
+        let running = 0;
+        let maxRunning = 0;
+
+        await mapWithConcurrency([1, 2, 3, 4, 5], 2, async () => {
+            running++;
+            maxRunning = Math.max(maxRunning, running);
+            await new Promise(resolve => setTimeout(resolve, 5));
+            running--;
+            return true;
+        });
+
+        expect(maxRunning).toBeLessThanOrEqual(2);
     });
 });
 

@@ -212,6 +212,33 @@ describe('bulk-fetch handler: correct path resolution', () => {
 
         await fs.rm(tmpDir, { recursive: true });
     });
+
+    it('returns metadata for all chat files with larger folders', async () => {
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tl-test-'));
+        const charDir = path.join(tmpDir, 'Large Character');
+        await fs.mkdir(charDir, { recursive: true });
+
+        const fileCount = 24;
+        for (let i = 0; i < fileCount; i++) {
+            await fs.writeFile(path.join(charDir, `chat_${String(i).padStart(3, '0')}.jsonl`), MINIMAL_JSONL, 'utf8');
+        }
+
+        responseCache.clear();
+
+        const req = makeReq(
+            { avatar_url: 'Large Character.png', is_group: false },
+            tmpDir,
+            path.join(tmpDir, 'group chats'),
+        );
+        const res = makeRes();
+
+        await bulkFetchHandler(req, res);
+
+        expect(res._statusCode).toBe(200);
+        expect(Object.keys(res._body.metadata)).toHaveLength(fileCount);
+
+        await fs.rm(tmpDir, { recursive: true });
+    });
 });
 
 // ---------------------------------------------------------------------------

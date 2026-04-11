@@ -211,4 +211,34 @@ describe('computeLayout: multiedge regression', () => {
             expect(Number.isFinite(node.position?.y), `${node.data.id} y`).toBe(true);
         }
     });
+
+    it('duplicate edge pairs do not change node positions versus deduped edges', () => {
+        const baseElements = [
+            { group: 'nodes', data: { id: 'root', label: 'root', name: 'Bot', send_date: '' } },
+            { group: 'nodes', data: { id: 'a', msg: 'A', chat_depth: 0, is_user: false, is_system: false, name: 'Bot', send_date: 'Jan 1' } },
+            { group: 'nodes', data: { id: 'b', msg: 'B', chat_depth: 1, is_user: true, is_system: false, name: 'User', send_date: 'Jan 1' } },
+            { group: 'edges', data: { id: 'e1', source: 'root', target: 'a' } },
+            { group: 'edges', data: { id: 'e2', source: 'a', target: 'b' } },
+        ];
+
+        const withDuplicates = [
+            ...baseElements,
+            { group: 'edges', data: { id: 'dup1', source: 'root', target: 'a' } },
+            { group: 'edges', data: { id: 'dup2', source: 'a', target: 'b' } },
+        ];
+
+        const deduped = JSON.parse(JSON.stringify(baseElements));
+        const duplicated = JSON.parse(JSON.stringify(withDuplicates));
+
+        computeLayout(deduped, layoutSettings);
+        computeLayout(duplicated, layoutSettings);
+
+        const dedupedPos = Object.fromEntries(deduped.filter(e => e.group === 'nodes').map(e => [e.data.id, e.position]));
+        const duplicatedPos = Object.fromEntries(duplicated.filter(e => e.group === 'nodes').map(e => [e.data.id, e.position]));
+
+        for (const id of Object.keys(dedupedPos)) {
+            expect(duplicatedPos[id].x).toBeCloseTo(dedupedPos[id].x, 5);
+            expect(duplicatedPos[id].y).toBeCloseTo(dedupedPos[id].y, 5);
+        }
+    });
 });
