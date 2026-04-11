@@ -1,7 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { _testExports as server } from '../../server-plugin/index.js';
 
-const { sfc32, cyrb128, generateUniqueColor, formatFileSize, getCacheKey, isCacheValid, CACHE_TTL } = server;
+const {
+    sfc32,
+    cyrb128,
+    generateUniqueColor,
+    formatFileSize,
+    getCacheKey,
+    isCacheValid,
+    resolveCacheTtlMs,
+    CACHE_TTL,
+    DEFAULT_CACHE_TTL,
+} = server;
 
 describe('sfc32', () => {
     it('returns a function', () => {
@@ -190,5 +200,27 @@ describe('isCacheValid', () => {
     it('entry exactly at TTL boundary is invalid', () => {
         const entry = { timestamp: Date.now() - CACHE_TTL };
         expect(isCacheValid(entry)).toBe(false);
+    });
+});
+
+describe('resolveCacheTtlMs', () => {
+    it('uses provided positive integer value', () => {
+        expect(resolveCacheTtlMs('120000', DEFAULT_CACHE_TTL)).toBe(120000);
+        expect(resolveCacheTtlMs(45000, DEFAULT_CACHE_TTL)).toBe(45000);
+    });
+
+    it('falls back when value is invalid or non-positive', () => {
+        expect(resolveCacheTtlMs(undefined, DEFAULT_CACHE_TTL)).toBe(DEFAULT_CACHE_TTL);
+        expect(resolveCacheTtlMs('not-a-number', DEFAULT_CACHE_TTL)).toBe(DEFAULT_CACHE_TTL);
+        expect(resolveCacheTtlMs('0', DEFAULT_CACHE_TTL)).toBe(DEFAULT_CACHE_TTL);
+        expect(resolveCacheTtlMs('-10', DEFAULT_CACHE_TTL)).toBe(DEFAULT_CACHE_TTL);
+    });
+
+    it('accepts values with leading/trailing spaces', () => {
+        expect(resolveCacheTtlMs(' 60000 ', DEFAULT_CACHE_TTL)).toBe(60000);
+    });
+
+    it('exports a positive runtime TTL', () => {
+        expect(CACHE_TTL).toBeGreaterThan(0);
     });
 });

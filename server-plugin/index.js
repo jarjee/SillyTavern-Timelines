@@ -9,6 +9,7 @@ import { createContext, runInContext } from 'vm';
 const gzipAsync = promisify(gzip);
 const GZIP_LEVEL = 3;
 const ENABLE_LAYOUT_DIAGNOSTICS = process.env.TIMELINES_LAYOUT_DEBUG === '1';
+const DEFAULT_CACHE_TTL = 5 * 60 * 1000;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,12 +24,20 @@ const dagreCtx = createContext({ module: { exports: {} }, exports: {}, global: {
 runInContext(dagreSrc, dagreCtx);
 const dagre = dagreCtx.module.exports;
 
+function resolveCacheTtlMs(rawValue, fallbackMs = DEFAULT_CACHE_TTL) {
+    const parsed = Number.parseInt(String(rawValue ?? ''), 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+    }
+    return fallbackMs;
+}
+
 /**
  * Response cache with TTL (Time To Live)
  * Stores cached responses for quick repeated requests
  */
 const responseCache = new Map();
-const CACHE_TTL = 30000; // 30 seconds in milliseconds
+const CACHE_TTL = resolveCacheTtlMs(process.env.TIMELINES_CACHE_TTL_MS, DEFAULT_CACHE_TTL);
 
 /**
  * Get or create cache key for a character/group/layout combination
@@ -834,7 +843,7 @@ async function init(router) {
         }
     });
 
-    console.log('[timelines-data] Plugin loaded! Endpoint: /api/plugins/timelines-data/bulk-fetch');
+    console.log(`[timelines-data] Plugin loaded! Endpoint: /api/plugins/timelines-data/bulk-fetch (cache TTL: ${CACHE_TTL}ms)`);
     return Promise.resolve();
 }
 
@@ -864,6 +873,6 @@ export const _testExports = {
     preprocessChatSessions, groupMessagesByContent, createNode,
     buildGraph, convertToCytoscapeElements, highlightCheckpointPaths,
     computeLayout, formatFileSize, getCacheKey, isCacheValid,
-    resolveChatDirectory,
-    responseCache, CACHE_TTL,
+    resolveChatDirectory, resolveCacheTtlMs,
+    responseCache, CACHE_TTL, DEFAULT_CACHE_TTL,
 };

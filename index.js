@@ -66,6 +66,7 @@ import { setupStylesAndData, highlightElements, restoreElements } from './tl_sty
 import { fetchData, prepareData, invalidateDataCache } from './tl_node_data.js';
 import { toggleGraphOrientation, highlightNodesByQuery, makeQueryFragments, setGraphOrientationBasedOnViewport, getGraphOrientation } from './tl_graph.js';
 import { getTimelineContextDescriptor, normalizeGraphDirection, resolveGraphDirection, shouldRefreshTimelineData } from './tl_context.js';
+import { applyIncrementalMessageUpdate, resolveTimelineChatFileName } from './tl_incremental.js';
 import { registerSlashCommand } from '../../../slash-commands.js';
 import { fixMarkdown } from '../../../power-user.js';
 import { hideLoader, showLoader } from '../../../loader.js';
@@ -82,6 +83,7 @@ let defaultSettings = {
     fixedHoverTooltip: false,
     align: 'UL',
     graphDirection: 'auto',
+    incrementalGraphUpdates: true,
     nodeRanker: 'tight-tree',
     nodeShape: 'ellipse',
     curveStyle: 'taxi',
@@ -110,6 +112,7 @@ let sourceInvalidatedContextKeys = new Set();  // context keys whose server cach
 let timelineUpdatePromise = null;  // de-dupe concurrent updateTimelineDataIfNeeded calls
 let backgroundPrewarmTimeoutId = null;  // debounce background prewarm requests
 let timelineEventListenersRegistered = false;  // ensure listeners are attached only once
+let timelineGraphDirty = false;  // whether cached graph data changed since the last render
 let lastTimelineData = null;  // last fetched and prepared timeline data
 let lastServerComputed = false;  // whether the server computed layout + highlighting
 let theCy = null;  // Cytoscape instance
@@ -146,6 +149,7 @@ async function loadSettings() {
     $('#tl_rank_separation').val(extension_settings.timeline.rankSeparation).trigger('input');
     $('#tl_spacing_factor').val(extension_settings.timeline.spacingFactor).trigger('input');
     $('#tl_graph_direction').val(extension_settings.timeline.graphDirection).trigger('input');
+    $('#tl_incremental_updates').prop('checked', extension_settings.timeline.incrementalGraphUpdates).trigger('input');
     $('#tl_align').val(extension_settings.timeline.align).trigger('input');
     $('#tl_tooltip_fixed').prop('checked', extension_settings.timeline.fixedTooltip).trigger('input');
     $('#tl_hover_tooltip_fixed').prop('checked', extension_settings.timeline.fixedHoverTooltip).trigger('input');
@@ -1490,6 +1494,7 @@ function renderCytoscapeDiagram(nodeData, contextKey = null) {
         }
         setupEventHandlers(cy, nodeData);
         lastRenderedContextKey = contextKey ?? lastContextKey;
+        timelineGraphDirty = false;
     }
 }
 
@@ -1650,6 +1655,7 @@ async function updateTimelineDataIfNeeded(options = {}) {
         lastContextKey = contextKey;
         timelineDataInvalidated = false;
         sourceInvalidatedContextKeys.delete(contextKey);
+        timelineGraphDirty = true;
 
         dagreLayout = createDagreLayout(rankDir);
         layout = lastServerComputed ? { name: 'preset' } : dagreLayout;
@@ -1733,7 +1739,7 @@ async function onTimelineButtonClick() {
 
     handleModalDisplay();  // Show the timeline view, and wire the close button to close it.
     const currentContextKey = getTimelineContextDescriptor(getContext()).key;
-    const shouldRender = Boolean(currentContextKey) && (dataUpdated || !theCy || currentContextKey !== lastRenderedContextKey);
+    const shouldRender = Boolean(currentContextKey) && (dataUpdated || timelineGraphDirty || !theCy || currentContextKey !== lastRenderedContextKey);
     if (shouldRender && lastTimelineData) {
         renderCytoscapeDiagram(lastTimelineData, currentContextKey);  // after this, the Cytoscape instance `theCy` is alive
         toggleSwipes(theCy, extension_settings.timeline.autoExpandSwipes);
@@ -1794,6 +1800,80 @@ function handleTimelineMutationEvent() {
     queueBackgroundTimelinePrewarm();
 }
 
+async function handleTimelineRenderedMessageEvent(messageId, eventName) {
+    const context = getContext();
+    const contextDescriptor = getTimelineContextDescriptor(context);
+    const contextKey = contextDescriptor.key;
+    if (!contextKey) {
+        return;
+    }
+
+    const modalVisible = $('#timelinesModal').is(':visible');
+    const canAttemptIncrementalUpdate = Boolean(extension_settings.timeline.incrementalGraphUpdates)
+        && !modalVisible
+        && Boolean(lastTimelineData)
+        && !timelineDataInvalidated
+        && lastContextKey === contextKey;
+
+    if (!canAttemptIncrementalUpdate) {
+        handleTimelineMutationEvent();
+        return;
+    }
+
+    const depth = Number.parseInt(String(messageId), 10);
+    if (!Number.isInteger(depth) || depth < 0) {
+        console.debug(`Timelines: ${eventName} had invalid depth '${messageId}', falling back to full refresh`);
+        handleTimelineMutationEvent();
+        return;
+    }
+
+    const currentChat = context.chat;
+    const message = Array.isArray(currentChat) ? currentChat[depth] : undefined;
+    if (!message) {
+        console.debug(`Timelines: ${eventName} depth ${depth} has no message in context chat, falling back to full refresh`);
+        handleTimelineMutationEvent();
+        return;
+    }
+
+    const fileName = resolveTimelineChatFileName(context.chatId, lastTimelineData);
+    if (!fileName) {
+        console.debug(`Timelines: ${eventName} could not resolve chat file name for incremental update, falling back to full refresh`);
+        handleTimelineMutationEvent();
+        return;
+    }
+
+    const rankDir = dagreLayout.rankDir || getPreferredRankDirection();
+    const rankStep = Number(extension_settings.timeline.rankSeparation) * Number(extension_settings.timeline.spacingFactor);
+    const incrementalResult = applyIncrementalMessageUpdate({
+        graphElements: lastTimelineData,
+        message,
+        messageId: depth,
+        fileName,
+        rankDir,
+        rankStep,
+    });
+
+    if (!incrementalResult.applied) {
+        console.debug(`Timelines: ${eventName} incremental update skipped (${incrementalResult.reason}), falling back to full refresh`);
+        handleTimelineMutationEvent();
+        return;
+    }
+
+    lastTimelineData = incrementalResult.graphElements;
+    timelineGraphDirty = true;
+
+    if (incrementalResult.requiresRelayout) {
+        lastServerComputed = false;
+        layout = dagreLayout;
+    }
+
+    if (contextDescriptor.avatarUrl) {
+        void invalidateDataCache(contextDescriptor.avatarUrl, contextDescriptor.isGroupChat);
+    }
+
+    console.info(`Timelines: ${eventName} incrementally updated graph at depth ${depth} (${incrementalResult.reason})`);
+}
+
 function registerTimelineDataEventListeners() {
     if (timelineEventListenersRegistered) {
         return;
@@ -1805,9 +1885,12 @@ function registerTimelineDataEventListeners() {
         event_types.CHAT_LOADED,
     ].filter(Boolean);
 
-    const mutationEvents = [
+    const appendMessageEvents = [
         event_types.USER_MESSAGE_RENDERED,
         event_types.CHARACTER_MESSAGE_RENDERED,
+    ].filter(Boolean);
+
+    const mutationEvents = [
         event_types.MESSAGE_SWIPED,
         event_types.MESSAGE_EDITED,
         event_types.CHAT_CREATED,
@@ -1820,6 +1903,12 @@ function registerTimelineDataEventListeners() {
     contextEvents.forEach(eventName => {
         eventSource.on(eventName, () => {
             handleTimelineContextEvent(eventName);
+        });
+    });
+
+    appendMessageEvents.forEach(eventName => {
+        eventSource.on(eventName, (messageId) => {
+            void handleTimelineRenderedMessageEvent(messageId, eventName);
         });
     });
 
@@ -1849,6 +1938,7 @@ jQuery(async () => {
         'tl_rank_separation': 'rankSeparation',
         'tl_spacing_factor': 'spacingFactor',
         'tl_graph_direction': 'graphDirection',
+        'tl_incremental_updates': 'incrementalGraphUpdates',
         'tl_tooltip_fixed': 'fixedTooltip',
         'tl_hover_tooltip_fixed': 'fixedHoverTooltip',
         'tl_gpu_acceleration': 'gpuAcceleration',

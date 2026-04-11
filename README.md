@@ -121,6 +121,8 @@ Timelines now prewarms timeline data in the background when context changes, so 
 
 - `CHAT_CHANGED` / `CHAT_LOADED` for the same timeline context does **not** invalidate cached timeline data.
 - Message/chat mutation events invalidate and rebuild in the background.
+- With the server plugin enabled, precomputed graph responses are cached (5 minutes by default), so a browser refresh can often reuse the previous computation.
+- `Incremental Graph Updates` (enabled by default) tries an append-only fast path for newly rendered messages and falls back to full rebuild when edits/swipes/non-append changes are detected.
 
 ### Performance Diagnostics
 

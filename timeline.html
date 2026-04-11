@@ -105,6 +105,10 @@
                     </select>
                 </div>
                 <div class="timeline-view-settings_block flex-container">
+                    <label for="tl_incremental_updates" title="When possible, append new messages to the cached timeline graph instead of rebuilding everything. Unsupported cases automatically fall back to full refresh." data-i18n="[title]When possible, append new messages to the cached timeline graph instead of rebuilding everything. Unsupported cases automatically fall back to full refresh.">Incremental Graph Updates</label>
+                    <input id="tl_incremental_updates" type="checkbox" />
+                </div>
+                <div class="timeline-view-settings_block flex-container">
                     <label for="tl_node_shape" title="The visual appearance of a node in the graph." data-i18n="[title]The visual appearance of a node in the graph.">Node Shape</label>
                     <select id="tl_node_shape">
                         <option value="ellipse">Ellipse</option>
