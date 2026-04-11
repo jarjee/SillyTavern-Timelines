@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 SillyTavern-Timelines is a SillyTavern extension that visualizes chat histories as an interactive timeline/graph. It displays all chats with a character as nodes connected in a directed acyclic graph (DAG), allowing users to explore branches, swipes, and checkpoints in their chat history. Think of it as a "Loom" interface built on SillyTavern's chat paradigm.
 
+## Git Conventions
+
+Use **semantic commits** (`fix:`, `feat:`, `chore:`, `docs:`, `perf:`, `refactor:`, `test:`). The commit body should explain *why* the change is being made — the problem it solves or the motivation behind it — not just restate what the diff shows.
+
 ## Development Setup
 
 **No build tool required** - This extension ships as raw ES modules loaded dynamically by SillyTavern. However, you need SillyTavern installed to test locally.

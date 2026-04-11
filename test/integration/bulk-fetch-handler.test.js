@@ -10,6 +10,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import path from 'path';
 import fs from 'fs/promises';
 import os from 'os';
+import { gunzipSync } from 'zlib';
 import { init, _testExports } from '../../server-plugin/index.js';
 
 const { resolveChatDirectory, getCacheKey, responseCache } = _testExports;
@@ -41,13 +42,22 @@ function makeReq(body, chatsDir, groupChatsDir, userHandle = 'test-user') {
     };
 }
 
-/** Build a mock Express response that captures the first json() call */
+/** Build a mock Express response that captures json() or gzipped end() calls */
 function makeRes() {
     const res = {
         _statusCode: 200,
         _body: undefined,
+        _headers: {},
         status(code) { res._statusCode = code; return res; },
         json(body) { res._body = body; },
+        setHeader(name, value) { res._headers[name.toLowerCase()] = value; },
+        end(buffer) {
+            if (res._headers['content-encoding'] === 'gzip') {
+                res._body = JSON.parse(gunzipSync(buffer).toString('utf8'));
+            } else {
+                res._body = JSON.parse(buffer.toString('utf8'));
+            }
+        },
     };
     return res;
 }

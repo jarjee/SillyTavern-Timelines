@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs/promises';
 import { readFileSync } from 'fs';
+import { gzipSync } from 'zlib';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { createContext, runInContext } from 'vm';
@@ -350,8 +351,15 @@ function buildGraph(allChats, allChatFileNamesAndLengths) {
                 uniqueSwipes = [...new Set(allSwipes)].filter(swipeText => swipeText !== text);
             }
 
+            // Push node once per unique text group
+            cyElements.push({
+                group: 'nodes',
+                data: node,
+            });
+
             // Process each message in the group
             const uniqueParents = new Set();
+            const seenEdgePairs = new Set();
             for (const messageObj of group) {
                 const parentNodeId = previousNodes[messageObj.file_name];
 
@@ -395,22 +403,22 @@ function buildGraph(allChats, allChatFileNamesAndLengths) {
                     });
                 }
 
-                cyElements.push({
-                    group: 'nodes',
-                    data: node,
-                });
-
-                cyElements.push({
-                    group: 'edges',
-                    data: {
-                        id: `edge${keyCounter}`,
-                        source: parentNodeId,
-                        target: nodeId,
-                    },
-                });
+                // Only push an edge if this (source, target) pair is new
+                const edgeKey = `${parentNodeId}>${nodeId}`;
+                if (!seenEdgePairs.has(edgeKey)) {
+                    seenEdgePairs.add(edgeKey);
+                    cyElements.push({
+                        group: 'edges',
+                        data: {
+                            id: `edge${keyCounter}`,
+                            source: parentNodeId,
+                            target: nodeId,
+                        },
+                    });
+                    keyCounter += 1;
+                }
 
                 previousNodes[messageObj.file_name] = nodeId;
-                keyCounter += 1;
             }
             timeSwipes += performance.now() - tSwipe;
         }
@@ -526,7 +534,7 @@ function highlightCheckpointPaths(rawData) {
  */
 function computeLayout(elements, layoutSettings) {
     const tSetup = performance.now();
-    const g = new dagre.graphlib.Graph({ multigraph: true, compound: true });
+    const g = new dagre.graphlib.Graph({});
 
     const gObj = {};
     if (layoutSettings.nodeSep != null) gObj.nodesep = layoutSettings.nodeSep;
@@ -644,8 +652,10 @@ async function init(router) {
             if (isCacheValid(cached)) {
                 console.log(`[timelines-data] [perf] Cache hit, serving cached response`);
                 const tCacheStart = performance.now();
-                res.json(cached.data);
-                console.log(`[timelines-data] [perf] res.json (cached) took ${(performance.now() - tCacheStart).toFixed(1)}ms`);
+                res.setHeader('Content-Type', 'application/json');
+                res.setHeader('Content-Encoding', 'gzip');
+                res.end(cached.data);
+                console.log(`[timelines-data] [perf] Cache hit response took ${(performance.now() - tCacheStart).toFixed(1)}ms`);
                 return;
             }
 
@@ -739,15 +749,22 @@ async function init(router) {
                 serverComputed: serverComputed,
             };
 
-            // Cache the response
+            // Serialize and compress once; cache the buffer for fast subsequent hits
+            const tJson = performance.now();
+            const jsonString = JSON.stringify(response);
+            const compressed = gzipSync(jsonString);
+            console.log(`[timelines-data] [perf] JSON serialize + gzip (${(jsonString.length / 1024 / 1024).toFixed(1)}MB -> ${(compressed.length / 1024 / 1024).toFixed(1)}MB) took ${(performance.now() - tJson).toFixed(1)}ms`);
+
             responseCache.set(cacheKey, {
-                data: response,
+                data: compressed,
                 timestamp: Date.now()
             });
 
-            const tJson = performance.now();
-            res.json(response);
-            console.log(`[timelines-data] [perf] res.json (serialize + send) took ${(performance.now() - tJson).toFixed(1)}ms`);
+            const tSend = performance.now();
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Content-Encoding', 'gzip');
+            res.end(compressed);
+            console.log(`[timelines-data] [perf] Send took ${(performance.now() - tSend).toFixed(1)}ms`);
             console.log(`[timelines-data] [perf] Total request time: ${(performance.now() - t0).toFixed(1)}ms`);
         } catch (error) {
             console.error('[timelines-data] Error in bulk-fetch endpoint:', error);

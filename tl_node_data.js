@@ -114,8 +114,15 @@ function buildGraph(allChats, allChatFileNamesAndLengths) {
                 uniqueSwipes = [...new Set(allSwipes)].filter(swipeText => swipeText !== text);
             }
 
+            // Push node once per unique text group
+            cyElements.push({
+                group: 'nodes',
+                data: node,
+            });
+
             // Treat each message in this message group. A message may have multiple parents (happens for a canned reply, used in several chats at the same chat depth).
             const uniqueParents = new Set();
+            const seenEdgePairs = new Set();
             for (const messageObj of group) {
                 const parentNodeId = previousNodes[messageObj.file_name];
 
@@ -159,25 +166,23 @@ function buildGraph(allChats, allChatFileNamesAndLengths) {
                     });
                 }
 
-                cyElements.push({
-                    group: 'nodes',
-                    data: node,
-                });
-
-                // Create edge for this node
-                cyElements.push({
-                    group: 'edges',
-                    data: {
-                        id: `edge${keyCounter}`,
-                        source: parentNodeId,
-                        target: nodeId,
-                    },
-                });
+                // Only push an edge if this (source, target) pair is new
+                const edgeKey = `${parentNodeId}>${nodeId}`;
+                if (!seenEdgePairs.has(edgeKey)) {
+                    seenEdgePairs.add(edgeKey);
+                    cyElements.push({
+                        group: 'edges',
+                        data: {
+                            id: `edge${keyCounter}`,
+                            source: parentNodeId,
+                            target: nodeId,
+                        },
+                    });
+                    keyCounter += 1;
+                }
 
                 // Keep track of the originating node for each message in the group
                 previousNodes[messageObj.file_name] = nodeId;
-
-                keyCounter += 1;
             }
         }
     }
