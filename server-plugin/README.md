@@ -5,12 +5,12 @@ This server plugin provides a consolidated endpoint for the SillyTavern-Timeline
 ## What It Does
 
 The plugin adds a new endpoint `/api/plugins/timelines-data/bulk-fetch` that:
-- Fetches the list of all chats for a character in a single request
-- Reads all chat files in parallel for maximum performance
+- Fetches all chat files for a character/group in one request
+- Builds timeline graph elements server-side (optionally with dagre layout positions)
+- Uses bounded file read/parse concurrency to reduce resource spikes
 - Caches responses for 30 seconds to avoid redundant file I/O
-- Returns both chat messages and metadata in one response
 
-**Performance improvement**: For a character with 10 chats, this reduces **11 requests to 1 request** (~10x faster).
+**Performance improvement**: For a character with 10 chats, this reduces **11 requests to 1 request** (~10x fewer requests).
 
 ## Installation
 
@@ -64,14 +64,11 @@ No additional configuration needed in the plugin itself.
 **Response:**
 ```json
 {
-  "chats": {
-    "chat_name_1.jsonl": [
-      { "mes": "message text", "name": "Character", "is_user": false, ... },
-      ...
-    ],
-    "chat_name_2.jsonl": [ ... ],
-    ...
-  },
+  "graph": [
+    { "group": "nodes", "data": { "id": "root", "label": "root", ... } },
+    { "group": "nodes", "data": { "id": "message1", "msg": "...", ... } },
+    { "group": "edges", "data": { "id": "edge1", "source": "root", "target": "message1" } }
+  ],
   "metadata": {
     "chat_name_1.jsonl": {
       "file_size": "12.45kb",
@@ -80,9 +77,15 @@ No additional configuration needed in the plugin itself.
       "last_mes": 1234567890
     },
     ...
-  }
+  },
+  "serverComputed": true
 }
 ```
+
+Notes:
+
+- `serverComputed=true` means layout positions were computed server-side (when `layout_settings` is sent in the request body).
+- `serverComputed=false` means graph data was built server-side but layout is expected client-side.
 
 ### Invalidate Cache (Admin)
 
@@ -103,12 +106,28 @@ Or clear all cache:
 
 ## Features
 
-- ✅ **Parallel file reading**: All chat files loaded concurrently (faster)
+- ✅ **Bounded concurrency**: File reads/parsing run with a capped worker pool
 - ✅ **Response caching**: 30-second TTL to reduce file I/O on repeated requests
 - ✅ **Both chat modes**: Supports individual character and group chats
 - ✅ **Error handling**: Gracefully skips inaccessible files and continues
-- ✅ **Metadata included**: Last message, file size, message count in single response
+- ✅ **Graph + metadata**: Timeline graph payload and chat metadata in one response
 - ✅ **Auto-detection**: Finds chat/character directories automatically
+
+## Performance and Debug Env Vars
+
+Optional environment variables:
+
+- `TIMELINES_FILE_READ_CONCURRENCY`
+  - Controls maximum concurrent chat file read/parse workers.
+  - Default: `8`.
+- `TIMELINES_LAYOUT_DEBUG`
+  - Set to `1` to enable extra layout diagnostics in perf logs.
+
+Example:
+
+```bash
+TIMELINES_LAYOUT_DEBUG=1 TIMELINES_FILE_READ_CONCURRENCY=8 npm start
+```
 
 ## Troubleshooting
 
@@ -144,7 +163,7 @@ You don't need to reinstall the extension after installing the plugin—it will 
 
 - **Cache key**: Based on `avatar_url` + `is_group` flag
 - **Cache TTL**: 30 seconds (tunable in `CACHE_TTL` constant)
-- **File reading**: Uses Node.js `fs.promises` for async I/O
+- **File reading**: Uses Node.js `fs.promises` with bounded concurrency
 - **Error handling**: Individual file errors don't block other files from loading
 - **File sorting**: Chats sorted by filename in reverse alphabetical order (newest first)
 

@@ -19,6 +19,16 @@ Think *Loom* [[1]](https://generative.ink/posts/loom-interface-to-the-multiverse
 
 Use ST's inbuilt extension installer.
 
+### Server Plugin (Recommended)
+
+The biggest difference from the upstream project ([SillyTavern/SillyTavern-Timelines](https://github.com/SillyTavern/SillyTavern-Timelines)) is the optional server endpoint that does bulk chat loading and graph prep server-side:
+
+- Endpoint: `POST /api/plugins/timelines-data/bulk-fetch`
+- Server implementation: `server-plugin/index.js`
+- Plugin setup/details: `server-plugin/README.md`
+
+When installed, Timelines uses this endpoint first and falls back to the upstream-style client-side multi-request path if unavailable.
+
 ### Usage
 
 - Settings: *Extensions > Timelines*
@@ -73,6 +83,24 @@ Actions:
   - You can still use the Timelines search like you would a classical substring search (but that's not taking advantage of swoop's full potential).
 
 Hover tooltips describe available actions at any node or edge.
+
+### Performance Diagnostics
+
+The server plugin includes extra diagnostics that are disabled by default:
+
+- `TIMELINES_LAYOUT_DEBUG=1`
+  - Enables additional `computeLayout` diagnostics (unique IDs/edge-pair diagnostics).
+- `TIMELINES_FILE_READ_CONCURRENCY=<n>`
+  - Controls bounded file read/parse concurrency in the bulk endpoint.
+  - Default: `8`.
+
+Example startup (Linux/macOS):
+
+```bash
+TIMELINES_LAYOUT_DEBUG=1 TIMELINES_FILE_READ_CONCURRENCY=8 npm start
+```
+
+Look for logs prefixed with `[timelines-data] [perf]` from `server-plugin/index.js`.
 
 ### Checkpoints
 
