@@ -443,6 +443,48 @@ export async function fetchData(characterAvatar) {
 }
 
 /**
+ * Attempts to invalidate the server plugin cache for one context.
+ *
+ * This is best-effort only: if the plugin is not installed (404) or
+ * the request fails, the caller can continue and rely on normal fetch flow.
+ *
+ * @async
+ * @param {string} characterAvatar - Character avatar URL (or group avatar surrogate in server keying)
+ * @param {boolean} isGroupChat - Whether this context is a group chat
+ * @returns {Promise<boolean>} True when invalidation was accepted by the server plugin
+ */
+export async function invalidateDataCache(characterAvatar, isGroupChat) {
+    if (!characterAvatar) {
+        return false;
+    }
+
+    try {
+        const response = await fetch('/api/plugins/timelines-data/invalidate-cache', {
+            method: 'POST',
+            body: JSON.stringify({
+                avatar_url: characterAvatar,
+                is_group: isGroupChat,
+            }),
+            headers: getRequestHeaders(),
+        });
+
+        if (response.status === 404) {
+            return false;
+        }
+
+        if (!response.ok) {
+            console.warn(`Cache invalidation failed with status ${response.status}`);
+            return false;
+        }
+
+        return true;
+    } catch (error) {
+        console.warn('Cache invalidation endpoint error:', error.message);
+        return false;
+    }
+}
+
+/**
  * Attempts to fetch all chat data via the bulk endpoint (optimized server plugin).
  * Falls back to individual requests if the plugin is not installed.
  *

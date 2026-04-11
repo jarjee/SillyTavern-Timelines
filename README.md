@@ -84,6 +84,44 @@ Actions:
 
 Hover tooltips describe available actions at any node or edge.
 
+### Layout Direction and Alignment
+
+- **Graph Direction** controls the main flow of the DAG:
+  - `Auto` (default): `LR` on wide viewports, `TB` on tall viewports
+  - `Left to Right` (`LR`)
+  - `Top to Bottom` (`TB`)
+- **Rank Alignment** (`UL`, `UR`, `DL`, `DR`) is a Dagre tie-breaker inside each rank.
+  - It does **not** change the graph flow direction.
+
+### Dagre Ranker Tradeoffs
+
+On large timelines, ranker choice has a major impact on layout time.
+
+- `tight-tree`
+  - Fast in large real-world runs (roughly same class as `network-simplex`)
+  - Good default for large branching timelines
+- `network-simplex`
+  - Also fast in large real-world runs
+  - Often similar quality/perf to `tight-tree`
+- `longest-path`
+  - Can be much slower on dense/large timelines
+  - Useful as an alternative layout style, but typically worst latency
+
+Example measured server-side `dagre.layout()` times on a 2.5k-node / 2.6k-edge dataset:
+
+- `longest-path`: ~17.6s
+- `network-simplex`: ~6.8s
+- `tight-tree`: ~6.8s
+
+These numbers are dataset-dependent, but the relative ordering is common for large graphs.
+
+### Background Prewarm
+
+Timelines now prewarms timeline data in the background when context changes, so opening the modal is faster.
+
+- `CHAT_CHANGED` / `CHAT_LOADED` for the same timeline context does **not** invalidate cached timeline data.
+- Message/chat mutation events invalidate and rebuild in the background.
+
 ### Performance Diagnostics
 
 The server plugin includes extra diagnostics that are disabled by default:

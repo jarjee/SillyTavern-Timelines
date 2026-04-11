@@ -63,8 +63,9 @@ import { event_types, eventSource, saveSettingsDebounced } from '../../../../scr
 
 import { navigateToMessage, closeModal, closeTippy, handleModalDisplay, closeOpenDrawers } from './tl_utils.js';
 import { setupStylesAndData, highlightElements, restoreElements } from './tl_style.js';
-import { fetchData, prepareData } from './tl_node_data.js';
+import { fetchData, prepareData, invalidateDataCache } from './tl_node_data.js';
 import { toggleGraphOrientation, highlightNodesByQuery, makeQueryFragments, setGraphOrientationBasedOnViewport, getGraphOrientation } from './tl_graph.js';
+import { getTimelineContextDescriptor, normalizeGraphDirection, resolveGraphDirection, shouldRefreshTimelineData } from './tl_context.js';
 import { registerSlashCommand } from '../../../slash-commands.js';
 import { fixMarkdown } from '../../../power-user.js';
 import { hideLoader, showLoader } from '../../../loader.js';
@@ -80,6 +81,7 @@ let defaultSettings = {
     fixedTooltip: false,
     fixedHoverTooltip: false,
     align: 'UL',
+    graphDirection: 'auto',
     nodeRanker: 'tight-tree',
     nodeShape: 'ellipse',
     curveStyle: 'taxi',
@@ -101,7 +103,13 @@ let defaultSettings = {
 };
 
 let currentlyHighlighted = null;  // selector for active legend item
-let lastContext = null;  // for tracking whether we need to refresh the graph
+let lastContextKey = null;  // timeline context identity of cached data
+let lastRenderedContextKey = null;  // timeline context identity currently rendered in Cytoscape
+let timelineDataInvalidated = false;  // whether cached data for current context must be refreshed
+let sourceInvalidatedContextKeys = new Set();  // context keys whose server cache must be invalidated before next refresh
+let timelineUpdatePromise = null;  // de-dupe concurrent updateTimelineDataIfNeeded calls
+let backgroundPrewarmTimeoutId = null;  // debounce background prewarm requests
+let timelineEventListenersRegistered = false;  // ensure listeners are attached only once
 let lastTimelineData = null;  // last fetched and prepared timeline data
 let lastServerComputed = false;  // whether the server computed layout + highlighting
 let theCy = null;  // Cytoscape instance
@@ -137,6 +145,7 @@ async function loadSettings() {
     $('#tl_edge_separation').val(extension_settings.timeline.edgeSeparation).trigger('input');
     $('#tl_rank_separation').val(extension_settings.timeline.rankSeparation).trigger('input');
     $('#tl_spacing_factor').val(extension_settings.timeline.spacingFactor).trigger('input');
+    $('#tl_graph_direction').val(extension_settings.timeline.graphDirection).trigger('input');
     $('#tl_align').val(extension_settings.timeline.align).trigger('input');
     $('#tl_tooltip_fixed').prop('checked', extension_settings.timeline.fixedTooltip).trigger('input');
     $('#tl_hover_tooltip_fixed').prop('checked', extension_settings.timeline.fixedHoverTooltip).trigger('input');
@@ -1225,7 +1234,6 @@ function setupEventHandlers(cy, nodeData) {
     let reloadBtn = modal.getElementsByClassName('reload')[0];
     reloadBtn.onclick = function () {
         slashCommandHandler(null, 'r');  // r = reload
-        refreshLayout();
     };
 
     let zoomtofitBtn = modal.getElementsByClassName('zoomtofit')[0];
@@ -1259,7 +1267,8 @@ function setupEventHandlers(cy, nodeData) {
     cy.on('render', function () {
         if (!hasSetOrientation) {
             hasSetOrientation = true;
-            setGraphOrientationBasedOnViewport(cy, dagreLayout);
+            const graphDirection = normalizeGraphDirection(extension_settings.timeline.graphDirection);
+            setGraphOrientationBasedOnViewport(cy, dagreLayout, graphDirection, { runLayout: false });
             cy.nodes().forEach(node => { node.lock(); });  // nodes are always locked after running the layout anyway
             fixRootNodePosition(cy);
         }
@@ -1459,16 +1468,6 @@ function setupEventHandlers(cy, nodeData) {
         }
     });
 
-    // On certain chat events, null the lastContext, so that the graph refreshes at the next `updateTimelineDataIfNeeded`.
-    // TODO: Are there other events we should catch?
-    function clearLastContext() {
-        lastContext = null;
-    }
-    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, clearLastContext);
-    eventSource.on(event_types.USER_MESSAGE_RENDERED, clearLastContext);
-    eventSource.on(event_types.CHAT_DELETED, clearLastContext);
-    eventSource.on(event_types.CHATLOADED, clearLastContext);  // TODO: this seems wrong, no such constant?
-    eventSource.on(event_types.MESSAGE_SWIPED, clearLastContext);
 }
 
 /**
@@ -1477,8 +1476,9 @@ function setupEventHandlers(cy, nodeData) {
  * and if successful, sets up event handlers for the Cytoscape instance.
  *
  * @param {Object} nodeData - The data used to render the nodes and edges of the Cytoscape diagram.
+ * @param {string|null} [contextKey=null] - Timeline context key represented by this render.
  */
-function renderCytoscapeDiagram(nodeData) {
+function renderCytoscapeDiagram(nodeData, contextKey = null) {
     const styles = setupStylesAndData(nodeData, lastServerComputed);
     const cy = initializeCytoscape(nodeData, styles);
     if (cy) {
@@ -1489,97 +1489,180 @@ function renderCytoscapeDiagram(nodeData) {
             cy.maxZoom(Number(extension_settings.timeline.maxZoom));
         }
         setupEventHandlers(cy, nodeData);
+        lastRenderedContextKey = contextKey ?? lastContextKey;
     }
 }
 
-/**
- * Checks if the timeline data needs to be updated based on the context.
- * If the current context (representing either a character or a group chat session)
- * is different from the last known context, it fetches and prepares the required data.
- * The function then updates the layout configuration based on extension settings.
- *
- * @returns {Promise<boolean>} Returns true if the timeline data was updated, and false otherwise.
- */
-async function updateTimelineDataIfNeeded() {
-    const context = getContext();
-    if (!lastContext || lastContext.characterId !== context.characterId) {
-        let data = {};
+function getViewportDimensions() {
+    const width = (typeof window !== 'undefined')
+        ? (window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth)
+        : undefined;
+    const height = (typeof window !== 'undefined')
+        ? (window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight)
+        : undefined;
+    return { width, height };
+}
 
-        // Layout settings to send to the server for server-side layout computation
-        const layoutSettings = {
-            nodeSep: extension_settings.timeline.nodeSeparation,
-            edgeSep: extension_settings.timeline.edgeSeparation,
-            rankSep: extension_settings.timeline.rankSeparation,
-            rankDir: 'LR',
-            ranker: extension_settings.timeline.nodeRanker,
-            spacingFactor: extension_settings.timeline.spacingFactor,
-            acyclicer: 'greedy',
-            align: extension_settings.timeline.align,
-            nodeWidth: extension_settings.timeline.nodeWidth,
-            nodeHeight: extension_settings.timeline.nodeHeight,
-            swipeScale: extension_settings.timeline.swipeScale,
-            avatarAsRoot: extension_settings.timeline.avatarAsRoot,
-        };
+function getPreferredRankDirection() {
+    const graphDirection = normalizeGraphDirection(extension_settings.timeline.graphDirection);
+    const { width, height } = getViewportDimensions();
+    return resolveGraphDirection(graphDirection, width, height);
+}
 
-        let result;
-        if (!context.characterId) {  // group chat
-            let groupID = context.groupId;
-            if (groupID) {
-                // Send the group where the ID within the dict is equal to groupID
-                let group = context.groups.find(group => group.id === groupID);
-                // For each `group.chats`, we add to a dict with the key being the index and the value being the chat
-                // (`prepareData` ignores the keys, it needs the values only)
-                for (let i = 0; i < group.chats.length; i++) {
-                    console.debug(group.chats[i]);
-                    data[i] = { 'file_name': group.chats[i] };
-                }
-                result = await prepareData(data, true, layoutSettings);
-            }
+function createServerLayoutSettings(rankDir) {
+    return {
+        nodeSep: extension_settings.timeline.nodeSeparation,
+        edgeSep: extension_settings.timeline.edgeSeparation,
+        rankSep: extension_settings.timeline.rankSeparation,
+        rankDir,
+        ranker: extension_settings.timeline.nodeRanker,
+        spacingFactor: extension_settings.timeline.spacingFactor,
+        acyclicer: 'greedy',
+        align: extension_settings.timeline.align,
+        nodeWidth: extension_settings.timeline.nodeWidth,
+        nodeHeight: extension_settings.timeline.nodeHeight,
+        swipeScale: extension_settings.timeline.swipeScale,
+        avatarAsRoot: extension_settings.timeline.avatarAsRoot,
+    };
+}
+
+function createDagreLayout(rankDir) {
+    // https://github.com/cytoscape/cytoscape.js-dagre
+    // https://js.cytoscape.org/#layouts
+    return {
+        name: 'dagre',
+        nodeDimensionsIncludeLabels: true,
+        nodeSep: extension_settings.timeline.nodeSeparation,  // Separation between adjacent nodes in the same rank
+        edgeSep: extension_settings.timeline.edgeSeparation,  // Separation between adjacent edges in the same rank
+        rankSep: extension_settings.timeline.rankSeparation,  // Separation between each rank in the layout
+        rankDir,
+        ranker: extension_settings.timeline.nodeRanker,  // Algorithm to compute node rank: 'network-simplex', 'tight-tree', or 'longest-path'
+        spacingFactor: extension_settings.timeline.spacingFactor,  // Multiplicative factor (>0) to expand or compress the overall area that the nodes take up
+        acyclicer: 'greedy',  // 'greedy' or undefined. We shouldn't need an acyclicer, but let's be careful.
+        align: extension_settings.timeline.align,  // Alignment for rank nodes. Can be 'UL', 'UR', 'DL', or 'DR', where U = up, D = down, L = left, and R = right
+        sort: function (a, b) { return a.id() < b.id() },  // Layout tie-breaker: prefer the element that our `buildGraph` created first.
+    };
+}
+
+function invalidateTimelineData(options = {}) {
+    const { sourceDataChanged = false } = options;
+    timelineDataInvalidated = true;
+    if (sourceDataChanged) {
+        const contextKey = getTimelineContextDescriptor(getContext()).key;
+        if (contextKey) {
+            sourceInvalidatedContextKeys.add(contextKey);
         }
-        else {
-            data = await fetchData(context.characters[context.characterId].avatar);
-            result = await prepareData(data, false, layoutSettings);
-        }
-
-        if (result) {
-            lastTimelineData = result.graph;
-            lastServerComputed = result.serverComputed;
-        }
-
-        lastContext = context; // Update `lastContext` to the current context
-        console.info(`Timeline data updated (serverComputed: ${lastServerComputed})`);
-
-        // Dagre layout config — always needed for re-layout (orientation toggle, swipe toggle)
-        // https://github.com/cytoscape/cytoscape.js-dagre
-        // https://js.cytoscape.org/#layouts
-        dagreLayout = {
-            name: 'dagre',
-            nodeDimensionsIncludeLabels: true,
-            nodeSep: extension_settings.timeline.nodeSeparation,  // Separation between adjacent nodes in the same rank
-            edgeSep: extension_settings.timeline.edgeSeparation,  // Separation between adjacent edges in the same rank
-            rankSep: extension_settings.timeline.rankSeparation,  // Separation between each rank in the layout
-            rankDir: 'LR',  // 'TB' for top to bottom flow, 'LR' for left to right (this is toggled by `toggleGraphOrientation`)
-            ranker: extension_settings.timeline.nodeRanker,  // Algorithm to compute node rank: 'network-simplex', 'tight-tree', or 'longest-path'
-            spacingFactor: extension_settings.timeline.spacingFactor,  // Multiplicative factor (>0) to expand or compress the overall area that the nodes take up
-            acyclicer: 'greedy',  // 'greedy' or undefined. We shouldn't need an acyclicer, but let's be careful.
-            align: extension_settings.timeline.align,  // Alignment for rank nodes. Can be 'UL', 'UR', 'DL', or 'DR', where U = up, D = down, L = left, and R = right
-            sort: function (a, b) { return a.id() < b.id() },  // Layout tie-breaker: prefer the element that our `buildGraph` created first.
-        };
-
-        // If server computed positions, use preset layout for initial render;
-        // otherwise fall back to dagre layout.
-        if (lastServerComputed) {
-            layout = {
-                name: 'preset',
-                // Cytoscape reads positions from element.position (already baked in by server)
-            };
-        } else {
-            layout = dagreLayout;
-        }
-
-        return true; // Data was updated
     }
-    return false; // No update occurred
+}
+
+function queueBackgroundTimelinePrewarm(delayMs = 150) {
+    if (backgroundPrewarmTimeoutId !== null) {
+        clearTimeout(backgroundPrewarmTimeoutId);
+    }
+
+    backgroundPrewarmTimeoutId = setTimeout(() => {
+        backgroundPrewarmTimeoutId = null;
+        void runBackgroundTimelinePrewarm();
+    }, delayMs);
+}
+
+async function runBackgroundTimelinePrewarm() {
+    try {
+        const dataUpdated = await updateTimelineDataIfNeeded();
+        const modalVisible = $('#timelinesModal').is(':visible');
+        if (dataUpdated && modalVisible && lastTimelineData) {
+            renderCytoscapeDiagram(lastTimelineData, lastContextKey);
+            toggleSwipes(theCy, extension_settings.timeline.autoExpandSwipes);
+        }
+    } catch (error) {
+        console.warn('Timelines background prewarm failed:', error?.message ?? error);
+    }
+}
+
+async function fetchTimelineDataForContext(context, contextDescriptor, layoutSettings) {
+    if (contextDescriptor.isGroupChat) {
+        const group = context.groups.find(groupInfo => String(groupInfo.id) === contextDescriptor.groupId);
+        if (!group) {
+            console.warn(`Timelines group not found for context ${contextDescriptor.groupId}`);
+            return null;
+        }
+
+        const data = {};
+        for (let i = 0; i < group.chats.length; i++) {
+            data[i] = { file_name: group.chats[i] };
+        }
+        return prepareData(data, true, layoutSettings);
+    }
+
+    const avatarUrl = contextDescriptor.avatarUrl;
+    if (!avatarUrl) {
+        console.warn('Timelines context has no avatar URL; skipping update');
+        return null;
+    }
+
+    const chatListData = await fetchData(avatarUrl);
+    if (!chatListData) {
+        console.warn(`Timelines failed to fetch chat list for ${avatarUrl}`);
+        return null;
+    }
+    return prepareData(chatListData, false, layoutSettings);
+}
+
+/**
+ * Checks whether timeline data should be refreshed for the current context.
+ *
+ * @param {Object} [options] - Optional behavior flags.
+ * @param {boolean} [options.force=false] - Force refresh even if context did not change.
+ * @returns {Promise<boolean>} Returns true if timeline data was refreshed.
+ */
+async function updateTimelineDataIfNeeded(options = {}) {
+    if (timelineUpdatePromise) {
+        return timelineUpdatePromise;
+    }
+
+    timelineUpdatePromise = (async () => {
+        const { force = false } = options;
+        const context = getContext();
+        const contextDescriptor = getTimelineContextDescriptor(context);
+        const contextKey = contextDescriptor.key;
+
+        const needUpdate = force || !lastTimelineData || shouldRefreshTimelineData(lastContextKey, contextKey, timelineDataInvalidated);
+        if (!needUpdate) {
+            return false;
+        }
+        if (!contextKey) {
+            return false;
+        }
+
+        if (contextDescriptor.avatarUrl && sourceInvalidatedContextKeys.has(contextKey)) {
+            await invalidateDataCache(contextDescriptor.avatarUrl, contextDescriptor.isGroupChat);
+        }
+
+        const rankDir = getPreferredRankDirection();
+        const layoutSettings = createServerLayoutSettings(rankDir);
+        const result = await fetchTimelineDataForContext(context, contextDescriptor, layoutSettings);
+        if (!result) {
+            return false;
+        }
+
+        lastTimelineData = result.graph;
+        lastServerComputed = Boolean(result.serverComputed);
+        lastContextKey = contextKey;
+        timelineDataInvalidated = false;
+        sourceInvalidatedContextKeys.delete(contextKey);
+
+        dagreLayout = createDagreLayout(rankDir);
+        layout = lastServerComputed ? { name: 'preset' } : dagreLayout;
+
+        console.info(`Timeline data updated (context=${contextKey}, rankDir=${rankDir}, serverComputed=${lastServerComputed})`);
+        return true;
+    })();
+
+    try {
+        return await timelineUpdatePromise;
+    } finally {
+        timelineUpdatePromise = null;
+    }
 }
 
 /**
@@ -1649,8 +1732,10 @@ async function onTimelineButtonClick() {
     }
 
     handleModalDisplay();  // Show the timeline view, and wire the close button to close it.
-    if (dataUpdated) {
-        renderCytoscapeDiagram(lastTimelineData);  // after this, the Cytoscape instance `theCy` is alive
+    const currentContextKey = getTimelineContextDescriptor(getContext()).key;
+    const shouldRender = Boolean(currentContextKey) && (dataUpdated || !theCy || currentContextKey !== lastRenderedContextKey);
+    if (shouldRender && lastTimelineData) {
+        renderCytoscapeDiagram(lastTimelineData, currentContextKey);  // after this, the Cytoscape instance `theCy` is alive
         toggleSwipes(theCy, extension_settings.timeline.autoExpandSwipes);
     }
     closeOpenDrawers();
@@ -1677,9 +1762,70 @@ async function onTimelineButtonClick() {
  */
 function slashCommandHandler(_, reload) {
     if (reload == 'r') {
-        lastContext = null;
+        invalidateTimelineData({ sourceDataChanged: true });
     }
     onTimelineButtonClick();
+}
+
+function handleTimelineContextEvent(eventName) {
+    const contextDescriptor = getTimelineContextDescriptor(getContext());
+    const contextKey = contextDescriptor.key;
+    if (!contextKey) {
+        return;
+    }
+
+    const hasFreshCacheForContext = Boolean(lastTimelineData)
+        && lastContextKey === contextKey
+        && !timelineDataInvalidated;
+    if (hasFreshCacheForContext) {
+        console.debug(`Timelines: ${eventName} stayed on ${contextKey}; keeping cache`);
+        return;
+    }
+
+    queueBackgroundTimelinePrewarm();
+}
+
+function handleTimelineMutationEvent() {
+    const contextDescriptor = getTimelineContextDescriptor(getContext());
+    if (!contextDescriptor.key) {
+        return;
+    }
+    invalidateTimelineData({ sourceDataChanged: true });
+    queueBackgroundTimelinePrewarm();
+}
+
+function registerTimelineDataEventListeners() {
+    if (timelineEventListenersRegistered) {
+        return;
+    }
+    timelineEventListenersRegistered = true;
+
+    const contextEvents = [
+        event_types.CHAT_CHANGED,
+        event_types.CHAT_LOADED,
+    ].filter(Boolean);
+
+    const mutationEvents = [
+        event_types.USER_MESSAGE_RENDERED,
+        event_types.CHARACTER_MESSAGE_RENDERED,
+        event_types.MESSAGE_SWIPED,
+        event_types.MESSAGE_EDITED,
+        event_types.CHAT_CREATED,
+        event_types.CHAT_DELETED,
+        event_types.GROUP_CHAT_CREATED,
+        event_types.GROUP_CHAT_DELETED,
+        event_types.GROUP_UPDATED,
+    ].filter(Boolean);
+
+    contextEvents.forEach(eventName => {
+        eventSource.on(eventName, () => {
+            handleTimelineContextEvent(eventName);
+        });
+    });
+
+    mutationEvents.forEach(eventName => {
+        eventSource.on(eventName, handleTimelineMutationEvent);
+    });
 }
 
 /**
@@ -1702,6 +1848,7 @@ jQuery(async () => {
         'tl_edge_separation': 'edgeSeparation',
         'tl_rank_separation': 'rankSeparation',
         'tl_spacing_factor': 'spacingFactor',
+        'tl_graph_direction': 'graphDirection',
         'tl_tooltip_fixed': 'fixedTooltip',
         'tl_hover_tooltip_fixed': 'fixedHoverTooltip',
         'tl_gpu_acceleration': 'gpuAcceleration',
@@ -1756,7 +1903,9 @@ jQuery(async () => {
         processTimelinesHotkeys(event.originalEvent);
     });
 
-    loadSettings();
+    await loadSettings();
+    registerTimelineDataEventListeners();
+    queueBackgroundTimelinePrewarm(250);
 });
 
 /**
@@ -1853,7 +2002,7 @@ function onInputChange(element, settingName, rgbaValue = null) {
 
     // Update the actual setting
     extension_settings.timeline[settingName] = value;
-    lastContext = null; // Invalidate the last context to force a data update
+    invalidateTimelineData();
 
     // If changing this setting triggered a linked update on another setting, process it now.
     // We must do this *after* updating the actual settings object, so that one debounced save

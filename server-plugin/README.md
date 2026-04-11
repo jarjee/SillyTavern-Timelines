@@ -156,7 +156,7 @@ You don't need to reinstall the extension after installing the plugin—it will 
 
 ## Technical Notes
 
-- **Cache key**: Based on `avatar_url` + `is_group` flag
+- **Cache key**: Based on `avatar_url` + `is_group` + serialized `layout_settings`
 - **Cache TTL**: 30 seconds (tunable in `CACHE_TTL` constant)
 - **File reading**: Uses Node.js `fs.promises` for async I/O
 - **Error handling**: Individual file errors don't block other files from loading

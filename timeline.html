@@ -97,6 +97,14 @@
                     </select>
                 </div>
                 <div class="timeline-view-settings_block flex-container">
+                    <label for="tl_graph_direction" title="Primary graph flow direction. Auto picks LR on wide viewports and TB on tall viewports." data-i18n="[title]Primary graph flow direction. Auto picks LR on wide viewports and TB on tall viewports.">Graph Direction</label>
+                    <select id="tl_graph_direction">
+                        <option value="auto">Auto (Viewport)</option>
+                        <option value="LR">Left to Right</option>
+                        <option value="TB">Top to Bottom</option>
+                    </select>
+                </div>
+                <div class="timeline-view-settings_block flex-container">
                     <label for="tl_node_shape" title="The visual appearance of a node in the graph." data-i18n="[title]The visual appearance of a node in the graph.">Node Shape</label>
                     <select id="tl_node_shape">
                         <option value="ellipse">Ellipse</option>
@@ -140,11 +148,7 @@
                     </select>
                 </div>
                 <div class="timeline-view-settings_block flex-container">
-                    <!-- Whatever that means. The phrase comes from the Cytoscape-Dagre README:
-                           https://github.com/cytoscape/cytoscape.js-dagre
-                           https://js.cytoscape.org/#layouts
-                    -->
-                    <label for="tl_align" title="Alignment for rank nodes." data-i18n="[title]Alignment for rank nodes.">Alignment</label>
+                    <label for="tl_align" title="Tie-breaker alignment for nodes within each rank. This does not change graph direction." data-i18n="[title]Tie-breaker alignment for nodes within each rank. This does not change graph direction.">Rank Alignment</label>
                     <select id="tl_align">
                         <option value="UL">Upper Left</option>
                         <option value="UR">Upper Right</option>

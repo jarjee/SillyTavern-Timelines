@@ -1,4 +1,5 @@
 import { highlightElements, restoreElements } from './tl_style.js';
+import { resolveGraphDirection } from './tl_context.js';
 
 let currentOrientation = 'TB';  // starting orientation
 
@@ -23,13 +24,17 @@ export function toggleGraphOrientation(cy, layout, options = {}) {
  *
  * @param {Object} cy - The Cytoscape instance representing the graph.
  * @param {Object} layout - The Cytoscape layout configuration object.
+ * @param {string} [graphDirection='auto'] - One of 'auto', 'LR', or 'TB'.
+ * @param {Object} [options] - Optional behavior flags.
+ * @param {boolean} [options.runLayout=true] - Whether to run the layout immediately.
  */
-export function setGraphOrientationBasedOnViewport(cy, layout) {
+export function setGraphOrientationBasedOnViewport(cy, layout, graphDirection = 'auto', options = {}) {
+    const { runLayout = true } = options;
     const viewportWidth = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth;
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight;
 
-    const orientation = (viewportWidth > viewportHeight) ? 'LR' : 'TB';
-    setOrientation(cy, orientation, layout);
+    const orientation = resolveGraphDirection(graphDirection, viewportWidth, viewportHeight);
+    setOrientation(cy, orientation, layout, runLayout);
 }
 
 /**
