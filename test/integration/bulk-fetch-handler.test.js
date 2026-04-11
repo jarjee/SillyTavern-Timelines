@@ -84,6 +84,17 @@ const MINIMAL_JSONL = [
     JSON.stringify({ name: 'Bot', is_user: false, is_system: false, is_name: true, mes: 'Hello', send_date: 'Jan 1', swipes: [] }),
 ].join('\n');
 
+async function writeFixtureAsIndividualChats(charDir, fixture) {
+    await fs.mkdir(charDir, { recursive: true });
+    for (const [fileName, messages] of Object.entries(fixture)) {
+        const jsonl = [
+            JSON.stringify({ chat_metadata: { main_chat: '' } }),
+            ...messages.map(msg => JSON.stringify(msg)),
+        ].join('\n');
+        await fs.writeFile(path.join(charDir, fileName), jsonl, 'utf8');
+    }
+}
+
 // ---------------------------------------------------------------------------
 // resolveChatDirectory (pure function unit tests)
 // ---------------------------------------------------------------------------
@@ -277,6 +288,43 @@ describe('bulk-fetch handler: layout_settings', () => {
             expect(Number.isFinite(node.position.x)).toBe(true);
             expect(Number.isFinite(node.position.y)).toBe(true);
         }
+
+        await fs.rm(tmpDir, { recursive: true });
+    });
+
+    it('stress fixture corpus computes layout without 500 and returns positioned nodes', async () => {
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tl-test-'));
+        const charDir = path.join(tmpDir, 'Stress Felix');
+        const fixtureRaw = await fs.readFile(new URL('../fixtures/parallel-edge-stress.json', import.meta.url), 'utf8');
+        const fixture = JSON.parse(fixtureRaw);
+
+        await writeFixtureAsIndividualChats(charDir, fixture);
+        responseCache.clear();
+
+        const req = makeReq(
+            { avatar_url: 'Stress Felix.png', is_group: false, layout_settings: LAYOUT_SETTINGS },
+            tmpDir,
+            path.join(tmpDir, 'group chats'),
+        );
+        const res = makeRes();
+
+        await bulkFetchHandler(req, res);
+
+        expect(res._statusCode).toBe(200);
+        expect(res._body.serverComputed).toBe(true);
+        expect(Array.isArray(res._body.graph)).toBe(true);
+        expect(res._body.graph.length).toBeGreaterThan(20);
+
+        const nodes = res._body.graph.filter(e => e.group === 'nodes');
+        expect(nodes.length).toBeGreaterThan(10);
+        for (const node of nodes) {
+            expect(node.position, `node ${node.data.id} missing position`).toBeDefined();
+            expect(Number.isFinite(node.position.x), `node ${node.data.id} x`).toBe(true);
+            expect(Number.isFinite(node.position.y), `node ${node.data.id} y`).toBe(true);
+        }
+
+        const edges = res._body.graph.filter(e => e.group === 'edges');
+        expect(edges.length).toBeGreaterThan(10);
 
         await fs.rm(tmpDir, { recursive: true });
     });

@@ -102,5 +102,31 @@
     { "mes": "Adventure lies around every corner in lands like these.", "name": "Felix", "is_user": false, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:08:00" },
     { "mes": "Thank you for showing me around.", "name": "User", "is_user": true, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:09:00" },
     { "mes": "It was my pleasure. Safe travels, friend.", "name": "Felix", "is_user": false, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:10:00" }
+  ],
+  "f9.jsonl": [
+    { "mes": "Hi, I'm Felix.", "name": "Felix", "is_user": false, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:00:00" },
+    { "mes": "Hello Felix, I'd like to explore.", "name": "User", "is_user": true, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:01:00" },
+    { "mes": "Of course! The Eastern plains await us.", "name": "Felix", "is_user": false, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:02:00" },
+    { "mes": "Which path looks safer to you?", "name": "User", "is_user": true, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:03:00" },
+    { "mes": "The southeast trail skirts the edge of the misty bog.", "name": "Felix", "is_user": false, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:04:00" },
+    { "mes": "Sounds good, let's go.", "name": "User", "is_user": true, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:05:00" },
+    { "mes": "A weathered watchtower appears in the distance, its lantern still flickering against the dusk.", "name": "Felix", "is_user": false, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:06:00" },
+    { "mes": "What do you make of this place?", "name": "User", "is_user": true, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:07:00" },
+    { "mes": "Adventure lies around every corner in lands like these.", "name": "Felix", "is_user": false, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:08:00" },
+    { "mes": "Thank you for showing me around.", "name": "User", "is_user": true, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:09:00" },
+    { "mes": "It was my pleasure. Safe travels, friend.", "name": "Felix", "is_user": false, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:10:00" }
+  ],
+  "f10.jsonl": [
+    { "mes": "Hi, I'm Felix.", "name": "Felix", "is_user": false, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:00:00" },
+    { "mes": "Hello Felix, I'd like to explore.", "name": "User", "is_user": true, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:01:00" },
+    { "mes": "Sure! We can head West toward the forest.", "name": "Felix", "is_user": false, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:02:00" },
+    { "mes": "Which path looks safer to you?", "name": "User", "is_user": true, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:03:00" },
+    { "mes": "The southwest path winds through a quiet valley.", "name": "Felix", "is_user": false, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:04:00" },
+    { "mes": "Sounds good, let's go.", "name": "User", "is_user": true, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:05:00" },
+    { "mes": "You find an old campsite by the stream; a journal page mentions hidden catacombs nearby.", "name": "Felix", "is_user": false, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:06:00", "swipes": ["You find an old campsite by the stream; a journal page mentions hidden catacombs nearby.", "The streamside camp looks recently abandoned, but a map fragment hints at catacombs."] },
+    { "mes": "What do you make of this place?", "name": "User", "is_user": true, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:07:00" },
+    { "mes": "This region holds many secrets yet to be uncovered.", "name": "Felix", "is_user": false, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:08:00" },
+    { "mes": "Thank you for showing me around.", "name": "User", "is_user": true, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:09:00" },
+    { "mes": "It was my pleasure. Safe travels, friend.", "name": "Felix", "is_user": false, "is_system": false, "is_name": true, "send_date": "Jan 1, 2024 12:10:00" }
   ]
 }
