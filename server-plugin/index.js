@@ -1,8 +1,9 @@
 import path from 'path';
 import fs from 'fs/promises';
 import { readFileSync } from 'fs';
-import { gzip } from 'zlib';
+import { gzip, gunzipSync } from 'zlib';
 import { promisify } from 'util';
+import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 import { createContext, runInContext } from 'vm';
 
@@ -47,9 +48,12 @@ const CACHE_TTL = resolveCacheTtlMs(process.env.TIMELINES_CACHE_TTL_MS, DEFAULT_
  * @param {string} userHandle - User handle for multi-user isolation
  * @returns {string} Cache key
  */
+/** @param {boolean} isGroup @returns {'group'|'char'} */
+function contextType(isGroup) { return isGroup ? 'group' : 'char'; }
+
 function getCacheKey(characterId, isGroup, layoutSettings, userHandle = '') {
     const layoutHash = layoutSettings ? JSON.stringify(layoutSettings) : '';
-    return `${userHandle}:${isGroup ? 'group' : 'char'}:${characterId}:${layoutHash}`;
+    return `${userHandle}:${contextType(isGroup)}:${characterId}:${layoutHash}`;
 }
 
 /**
@@ -98,6 +102,166 @@ function resolveChatDirectory(userDirectories, avatar_url, is_group) {
         return userDirectories.groupChats;
     }
     return path.join(userDirectories.chats, String(avatar_url).replace('.png', ''));
+}
+
+// ============================================================================
+// DISK CACHE HELPERS
+// ============================================================================
+
+const DISK_CACHE_SCHEMA_VERSION = 1;
+const SLUG_UNSAFE = /[^a-zA-Z0-9._-]/g;
+/** Layout-affecting fields from createServerLayoutSettings() in the frontend. */
+const LAYOUT_KEYS = [
+    'nodeSep', 'edgeSep', 'rankSep', 'rankDir', 'ranker',
+    'spacingFactor', 'acyclicer', 'align',
+    'nodeWidth', 'nodeHeight', 'swipeScale', 'avatarAsRoot',
+];
+
+/**
+ * Compute a short, stable hash of layout settings for use in cache filenames.
+ * Only geometry-affecting fields (LAYOUT_KEYS) are included.
+ * Key order is fixed so JSON serialization is deterministic.
+ * @param {Object|null} layoutSettings
+ * @returns {string} 12-character lowercase hex string
+ */
+function computeLayoutHash(layoutSettings) {
+    const canonical = {};
+    for (const key of LAYOUT_KEYS) {
+        canonical[key] = layoutSettings?.[key] ?? null;
+    }
+    return createHash('sha256').update(JSON.stringify(canonical)).digest('hex').slice(0, 12);
+}
+
+/**
+ * Build a sanitized filesystem-safe context slug.
+ * e.g. char_character.png or group_5
+ * @param {boolean} isGroup
+ * @param {string} id - avatar_url for chars, group_id for groups
+ * @returns {string}
+ */
+function buildContextSlug(isGroup, id) {
+    const safe = String(id).replace(SLUG_UNSAFE, '_');
+    return `${contextType(isGroup)}_${safe}`;
+}
+
+/**
+ * Build a deterministic fingerprint of a set of source files.
+ * @param {Array<{filename: string, mtimeMs: number, size: number}>} fileStats
+ * @returns {string} 16-character hex fingerprint
+ */
+function buildSourceFingerprint(fileStats) {
+    const sorted = [...fileStats].sort((a, b) => a.filename.localeCompare(b.filename));
+    return createHash('sha256').update(JSON.stringify(sorted)).digest('hex').slice(0, 16);
+}
+
+/**
+ * @param {Object} userDirectories - req.user.directories
+ * @returns {string} Path to the .timelines cache directory
+ */
+function getDiskCacheDir(userDirectories) {
+    return path.join(userDirectories.root, '.timelines');
+}
+
+/**
+ * @param {string} cacheDir
+ * @param {string} contextSlug
+ * @param {string} layoutHash
+ * @returns {{manifest: string, data: string}}
+ */
+function getDiskCachePaths(cacheDir, contextSlug, layoutHash) {
+    const base = `graph_${contextSlug}_${layoutHash}`;
+    return {
+        manifest: path.join(cacheDir, `${base}.manifest.json`),
+        data: path.join(cacheDir, `${base}.json.gz`),
+    };
+}
+
+/**
+ * Attempt to read a valid disk cache entry.
+ * Returns the raw gzip Buffer on hit, null on any miss or error.
+ * @param {{manifest: string, data: string}} paths
+ * @param {string} expectedLayoutHash
+ * @param {string} expectedFingerprint
+ * @returns {Promise<Buffer|null>}
+ */
+async function readDiskCache(paths, expectedLayoutHash, expectedFingerprint) {
+    try {
+        const rawManifest = await fs.readFile(paths.manifest, 'utf8');
+        const manifest = JSON.parse(rawManifest);
+        if (
+            manifest.schemaVersion !== DISK_CACHE_SCHEMA_VERSION ||
+            manifest.layoutHash !== expectedLayoutHash ||
+            manifest.sourceFingerprint !== expectedFingerprint
+        ) {
+            return null;
+        }
+        return await fs.readFile(paths.data);
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Atomically write manifest + gzip data to disk.
+ * Writes temp files then renames. Silently ignores write errors.
+ * @param {string} cacheDir
+ * @param {{manifest: string, data: string}} paths
+ * @param {Object} manifest
+ * @param {Buffer} gzipBuffer
+ * @returns {Promise<void>}
+ */
+async function writeDiskCache(paths, manifest, gzipBuffer) {
+    try {
+        await fs.mkdir(path.dirname(paths.manifest), { recursive: true });
+        const tmpManifest = paths.manifest + '.tmp';
+        const tmpData = paths.data + '.tmp';
+        await fs.writeFile(tmpManifest, JSON.stringify(manifest), 'utf8');
+        await fs.writeFile(tmpData, gzipBuffer);
+        await fs.rename(tmpManifest, paths.manifest);
+        await fs.rename(tmpData, paths.data);
+    } catch (err) {
+        console.warn('[timelines-data] Disk cache write failed (non-fatal):', err.message);
+    }
+}
+
+/**
+ * Delete all disk cache files for a given context slug.
+ * Errors are ignored (best-effort cleanup).
+ * @param {string} cacheDir
+ * @param {string} contextSlug
+ * @returns {Promise<void>}
+ */
+async function deleteDiskCacheForSlug(cacheDir, contextSlug) {
+    try {
+        const entries = await fs.readdir(cacheDir);
+        const prefix = `graph_${contextSlug}_`;
+        const toDelete = entries.filter(
+            name => name.startsWith(prefix) &&
+                (name.endsWith('.manifest.json') || name.endsWith('.json.gz'))
+        );
+        await Promise.all(toDelete.map(name =>
+            fs.unlink(path.join(cacheDir, name)).catch(() => {})
+        ));
+    } catch {
+        // cacheDir may not exist — that's fine
+    }
+}
+
+/**
+ * Load the authoritative list of chat filenames for a group.
+ * Reads {directories.groups}/{groupId}.json and returns group.chats.
+ * @param {Object} userDirectories - req.user.directories
+ * @param {string} groupId
+ * @returns {Promise<string[]>}
+ */
+async function loadGroupChats(userDirectories, groupId) {
+    const groupFilePath = path.join(userDirectories.groups, `${groupId}.json`);
+    const raw = await fs.readFile(groupFilePath, 'utf8');
+    const groupData = JSON.parse(raw);
+    if (!Array.isArray(groupData.chats)) {
+        throw new Error(`Group ${groupId} has no chats array`);
+    }
+    return groupData.chats;
 }
 
 /**
@@ -660,22 +824,26 @@ async function init(router) {
     router.post('/bulk-fetch', async (req, res) => {
         try {
             const t0 = performance.now();
-            const { avatar_url, is_group = false, layout_settings } = req.body;
+            const { avatar_url, is_group = false, layout_settings, group_id } = req.body;
             const shouldGzip = clientAcceptsGzip(req);
 
             if (!avatar_url) {
-                return res.status(400).json({
-                    error: 'Missing required field: avatar_url'
-                });
+                return res.status(400).json({ error: 'Missing required field: avatar_url' });
+            }
+
+            if (is_group && !group_id) {
+                return res.status(400).json({ error: 'Missing required field: group_id for group requests' });
             }
 
             const userHandle = req.user?.profile?.handle ?? '';
-            const cacheKey = getCacheKey(avatar_url, is_group, layout_settings, userHandle);
+            const contextId = is_group ? group_id : avatar_url;
+            const contextSlug = buildContextSlug(is_group, contextId);
+            const layoutHash = computeLayoutHash(layout_settings);
+            const cacheKey = getCacheKey(contextId, is_group, layout_settings, userHandle);
 
-            // Check cache first
             const cached = responseCache.get(cacheKey);
             if (isCacheValid(cached)) {
-                console.log(`[timelines-data] [perf] Cache hit, serving cached response`);
+                console.log(`[timelines-data] [perf] Memory cache hit, serving cached response`);
                 const tCacheStart = performance.now();
                 res.setHeader('Content-Type', 'application/json');
                 if (shouldGzip && cached.gzip) {
@@ -688,49 +856,98 @@ async function init(router) {
                     res.setHeader('Content-Encoding', 'gzip');
                     res.end(cached.data);
                 }
-                console.log(`[timelines-data] [perf] Cache hit response took ${(performance.now() - tCacheStart).toFixed(1)}ms`);
+                console.log(`[timelines-data] [perf] Memory cache hit response took ${(performance.now() - tCacheStart).toFixed(1)}ms`);
                 return;
             }
 
-            // Resolve chat directory from the authenticated user's directories
-            const chatDirectory = resolveChatDirectory(req.user.directories, avatar_url, is_group);
+            // Resolve source file list
+            let chatDir;
+            let chatFilenames;
 
-            const result = {
-                chats: {},
-                metadata: {}
-            };
-
-            // Check if directory exists
-            if (!(await fileExists(chatDirectory))) {
-                console.warn('[timelines-data] Chat directory does not exist:', chatDirectory);
-                return res.json({ graph: [], metadata: {}, serverComputed: false });
+            if (is_group) {
+                if (!req.user?.directories?.groups) {
+                    console.warn('[timelines-data] groups directory not available');
+                    return res.json({ graph: [], metadata: {}, serverComputed: false });
+                }
+                try {
+                    chatFilenames = await loadGroupChats(req.user.directories, group_id);
+                    chatDir = req.user.directories.groupChats;
+                } catch (e) {
+                    console.warn(`[timelines-data] Could not load group ${group_id}:`, e.message);
+                    return res.json({ graph: [], metadata: {}, serverComputed: false });
+                }
+            } else {
+                chatDir = path.join(req.user.directories.chats, String(avatar_url).replace('.png', ''));
+                const tDirRead = performance.now();
+                let files;
+                try {
+                    files = await fs.readdir(chatDir, { withFileTypes: true });
+                } catch (e) {
+                    if (e.code === 'ENOENT') {
+                        console.warn('[timelines-data] Chat directory does not exist:', chatDir);
+                        return res.json({ graph: [], metadata: {}, serverComputed: false });
+                    }
+                    throw e;
+                }
+                chatFilenames = files
+                    .filter(file => file.isFile() && file.name.endsWith('.jsonl'))
+                    .map(file => file.name)
+                    .sort((a, b) => b.localeCompare(a));
+                console.log(`[timelines-data] [perf] Directory listing (${chatFilenames.length} files) took ${(performance.now() - tDirRead).toFixed(1)}ms`);
             }
 
-            // Read directory of chats
-            const tDirRead = performance.now();
-            const files = await fs.readdir(chatDirectory, { withFileTypes: true });
-            const chatFiles = files
-                .filter(file => file.isFile() && file.name.endsWith('.jsonl'))
-                .sort((a, b) => b.name.localeCompare(a.name));
-            console.log(`[timelines-data] [perf] Directory listing (${chatFiles.length} files) took ${(performance.now() - tDirRead).toFixed(1)}ms`);
+            // Stat all source files for fingerprint (reused for metadata below)
+            const tStat = performance.now();
+            const fileStatMap = new Map();
+            await Promise.all(chatFilenames.map(async (name) => {
+                try {
+                    const stat = await fs.stat(path.join(chatDir, name));
+                    fileStatMap.set(name, stat);
+                } catch {
+                    // File may have been deleted between listing and stat; skip it
+                }
+            }));
+            const fileStatsArray = [];
+            for (const [filename, stat] of fileStatMap) {
+                fileStatsArray.push({ filename, mtimeMs: stat.mtimeMs, size: stat.size });
+            }
+            const sourceFingerprint = buildSourceFingerprint(fileStatsArray);
+            console.log(`[timelines-data] [perf] Source fingerprint (${fileStatsArray.length} files) took ${(performance.now() - tStat).toFixed(1)}ms`);
 
-            // Fetch all chats in parallel
+            // Check disk cache
+            const cacheDir = getDiskCacheDir(req.user.directories);
+            const diskPaths = getDiskCachePaths(cacheDir, contextSlug, layoutHash);
+            const diskGzip = await readDiskCache(diskPaths, layoutHash, sourceFingerprint);
+            if (diskGzip !== null) {
+                console.log(`[timelines-data] [perf] Disk cache hit`);
+                const jsonBuffer = Buffer.from(gunzipSync(diskGzip));
+                responseCache.set(cacheKey, { json: jsonBuffer, gzip: diskGzip, timestamp: Date.now() });
+                res.setHeader('Content-Type', 'application/json');
+                if (shouldGzip) {
+                    res.setHeader('Content-Encoding', 'gzip');
+                    res.end(diskGzip);
+                } else {
+                    res.end(jsonBuffer);
+                }
+                return;
+            }
+
+            const result = { chats: {}, metadata: {} };
             const tFileRead = performance.now();
             let totalMessages = 0;
             let totalBytes = 0;
-            await Promise.all(chatFiles.map(async (file) => {
+            await Promise.all(chatFilenames.map(async (name) => {
                 try {
-                    const chatPath = path.join(chatDirectory, file.name);
+                    const chatPath = path.join(chatDir, name);
                     const content = await fs.readFile(chatPath, 'utf8');
                     totalBytes += Buffer.byteLength(content, 'utf8');
                     const lines = content.trim().split('\n').filter(line => line.length > 0);
 
-                    // Parse chat messages
                     const messages = lines.map((line, index) => {
                         try {
                             return JSON.parse(line);
                         } catch (e) {
-                            console.error(`Failed to parse line ${index} in ${file.name}:`, e.message);
+                            console.error(`Failed to parse line ${index} in ${name}:`, e.message);
                             return null;
                         }
                     }).filter(msg => msg !== null);
@@ -742,25 +959,22 @@ async function init(router) {
                         messages.shift();
                     }
 
-                    result.chats[file.name] = messages;
+                    result.chats[name] = messages;
                     totalMessages += messages.length;
 
-                    // Get file stats for metadata
-                    const stat = await fs.stat(chatPath);
-                    const messageCount = messages.length;
+                    const stat = fileStatMap.get(name);
                     const lastMessage = messages[messages.length - 1];
-
-                    result.metadata[file.name] = {
-                        file_size: formatFileSize(stat.size),
-                        chat_items: messageCount,
+                    result.metadata[name] = {
+                        file_size: formatFileSize(stat ? stat.size : 0),
+                        chat_items: messages.length,
                         mes: lastMessage ? lastMessage.mes : '',
-                        last_mes: lastMessage ? lastMessage.send_date : stat.mtimeMs
+                        last_mes: lastMessage ? lastMessage.send_date : (stat ? stat.mtimeMs : 0),
                     };
                 } catch (e) {
-                    console.error(`Error reading chat ${file.name}:`, e.message);
+                    console.error(`Error reading chat ${name}:`, e.message);
                 }
             }));
-            console.log(`[timelines-data] [perf] File read + parse (${chatFiles.length} files, ${totalMessages} messages, ${(totalBytes / 1024 / 1024).toFixed(1)}MB) took ${(performance.now() - tFileRead).toFixed(1)}ms`);
+            console.log(`[timelines-data] [perf] File read + parse (${chatFilenames.length} files, ${totalMessages} messages, ${(totalBytes / 1024 / 1024).toFixed(1)}MB) took ${(performance.now() - tFileRead).toFixed(1)}ms`);
 
             // Build graph server-side
             const tGraph = performance.now();
@@ -782,12 +996,19 @@ async function init(router) {
                 serverComputed: serverComputed,
             };
 
-            // Serialize once and optionally compress for clients that accept gzip
             const tJson = performance.now();
             const jsonString = JSON.stringify(response);
             const jsonBuffer = Buffer.from(jsonString);
             const compressed = await gzipAsync(jsonBuffer, { level: GZIP_LEVEL });
             console.log(`[timelines-data] [perf] JSON serialize + gzip(lv${GZIP_LEVEL}) (${(jsonBuffer.length / 1024 / 1024).toFixed(1)}MB -> ${(compressed.length / 1024 / 1024).toFixed(1)}MB) took ${(performance.now() - tJson).toFixed(1)}ms`);
+
+            void writeDiskCache(diskPaths, {
+                schemaVersion: DISK_CACHE_SCHEMA_VERSION,
+                contextKey: `${contextType(is_group)}:${contextId}`,
+                layoutHash,
+                sourceFingerprint,
+                createdAt: Date.now(),
+            }, compressed);
 
             responseCache.set(cacheKey, {
                 json: jsonBuffer,
@@ -818,19 +1039,28 @@ async function init(router) {
      * Invalidate cache
      * POST /api/plugins/timelines-data/invalidate-cache
      */
-    router.post('/invalidate-cache', (req, res) => {
+    router.post('/invalidate-cache', async (req, res) => {
         try {
-            const { avatar_url, is_group } = req.body;
+            const { avatar_url, is_group, group_id } = req.body;
             const userHandle = req.user?.profile?.handle ?? '';
 
-            if (avatar_url) {
+            const contextId = (is_group && group_id) ? group_id : avatar_url;
+
+            if (contextId) {
                 // Clear all cache entries for this character/group
                 // (may have multiple entries for different layout settings)
-                const prefix = `${userHandle}:${is_group ? 'group' : 'char'}:${avatar_url}:`;
+                const prefix = `${userHandle}:${contextType(is_group)}:${contextId}:`;
                 for (const key of responseCache.keys()) {
                     if (key.startsWith(prefix)) {
                         responseCache.delete(key);
                     }
+                }
+
+                // Clear disk cache for this context
+                if (req.user?.directories?.root) {
+                    const cacheDir = getDiskCacheDir(req.user.directories);
+                    const contextSlug = buildContextSlug(is_group, contextId);
+                    await deleteDiskCacheForSlug(cacheDir, contextSlug);
                 }
             } else {
                 responseCache.clear();
@@ -875,4 +1105,9 @@ export const _testExports = {
     computeLayout, formatFileSize, getCacheKey, isCacheValid,
     resolveChatDirectory, resolveCacheTtlMs,
     responseCache, CACHE_TTL, DEFAULT_CACHE_TTL,
+    // Disk cache helpers
+    computeLayoutHash, buildContextSlug, buildSourceFingerprint,
+    getDiskCacheDir, getDiskCachePaths,
+    readDiskCache, writeDiskCache, deleteDiskCacheForSlug,
+    loadGroupChats, DISK_CACHE_SCHEMA_VERSION,
 };
