@@ -453,8 +453,8 @@ export async function fetchData(characterAvatar) {
  * @param {boolean} isGroupChat - Whether this context is a group chat
  * @returns {Promise<boolean>} True when invalidation was accepted by the server plugin
  */
-export async function invalidateDataCache(characterAvatar, isGroupChat) {
-    if (!characterAvatar) {
+export async function invalidateDataCache(characterAvatar, isGroupChat, groupId = null) {
+    if (!characterAvatar && !groupId) {
         return false;
     }
 
@@ -464,6 +464,7 @@ export async function invalidateDataCache(characterAvatar, isGroupChat) {
             body: JSON.stringify({
                 avatar_url: characterAvatar,
                 is_group: isGroupChat,
+                ...(groupId != null ? { group_id: groupId } : {}),
             }),
             headers: getRequestHeaders(),
         });
@@ -494,7 +495,7 @@ export async function invalidateDataCache(characterAvatar, isGroupChat) {
  * @param {Object} layoutSettings - Layout settings to send to the server for server-side layout computation
  * @returns {Promise<Object|null>} Bulk chat data or null if endpoint not available
  */
-async function fetchDataBulk(characterAvatar, isGroupChat, layoutSettings) {
+async function fetchDataBulk(characterAvatar, isGroupChat, layoutSettings, groupId = null) {
     try {
         const response = await fetch('/api/plugins/timelines-data/bulk-fetch', {
             method: 'POST',
@@ -502,6 +503,7 @@ async function fetchDataBulk(characterAvatar, isGroupChat, layoutSettings) {
                 avatar_url: characterAvatar,
                 is_group: isGroupChat,
                 layout_settings: layoutSettings,
+                ...(groupId != null ? { group_id: groupId } : {}),
             }),
             headers: getRequestHeaders(),
         });
@@ -544,12 +546,12 @@ async function fetchDataBulk(characterAvatar, isGroupChat, layoutSettings) {
  *   - {boolean} serverComputed - Whether layout & highlighting were computed server-side
  * @throws Will throw an error if the fetch request or data processing encounters issues.
  */
-export async function prepareData(data, isGroupChat, layoutSettings) {
+export async function prepareData(data, isGroupChat, layoutSettings, groupId = null) {
     const context = getContext();
     const characterAvatar = characters[context.characterId].avatar;
 
     // Try bulk fetch first (if server plugin is installed)
-    const bulkData = await fetchDataBulk(characterAvatar, isGroupChat, layoutSettings);
+    const bulkData = await fetchDataBulk(characterAvatar, isGroupChat, layoutSettings, groupId);
 
     if (bulkData !== null) {
         console.log(`Using server-side prebuilt graph (serverComputed: ${bulkData.serverComputed})`);

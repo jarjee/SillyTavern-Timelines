@@ -1596,7 +1596,7 @@ async function fetchTimelineDataForContext(context, contextDescriptor, layoutSet
         for (let i = 0; i < group.chats.length; i++) {
             data[i] = { file_name: group.chats[i] };
         }
-        return prepareData(data, true, layoutSettings);
+        return prepareData(data, true, layoutSettings, contextDescriptor.groupId);
     }
 
     const avatarUrl = contextDescriptor.avatarUrl;
@@ -1639,8 +1639,13 @@ async function updateTimelineDataIfNeeded(options = {}) {
             return false;
         }
 
-        if (contextDescriptor.avatarUrl && sourceInvalidatedContextKeys.has(contextKey)) {
-            await invalidateDataCache(contextDescriptor.avatarUrl, contextDescriptor.isGroupChat);
+        if (sourceInvalidatedContextKeys.has(contextKey) &&
+            (contextDescriptor.avatarUrl || contextDescriptor.groupId)) {
+            await invalidateDataCache(
+                contextDescriptor.avatarUrl,
+                contextDescriptor.isGroupChat,
+                contextDescriptor.groupId ?? null,
+            );
         }
 
         const rankDir = getPreferredRankDirection();
@@ -1867,8 +1872,12 @@ async function handleTimelineRenderedMessageEvent(messageId, eventName) {
         layout = dagreLayout;
     }
 
-    if (contextDescriptor.avatarUrl) {
-        void invalidateDataCache(contextDescriptor.avatarUrl, contextDescriptor.isGroupChat);
+    if (contextDescriptor.avatarUrl || contextDescriptor.groupId) {
+        void invalidateDataCache(
+            contextDescriptor.avatarUrl,
+            contextDescriptor.isGroupChat,
+            contextDescriptor.groupId ?? null,
+        );
     }
 
     console.info(`Timelines: ${eventName} incrementally updated graph at depth ${depth} (${incrementalResult.reason})`);
