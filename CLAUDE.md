@@ -297,3 +297,6 @@ console.log(window.extension_settings.timeline); // Current settings
 - **License**: MIT
 - **Homepage**: https://github.com/SillyTavern/SillyTavern-Timelines
 - **Auto-update**: Enabled
+
+## References
+The server is over under references/, use this for queries about the extension sdk / how the server works.
